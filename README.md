@@ -1,104 +1,171 @@
-openPlanning — community contribution
+# openPlanning — Community Contribution
 
-This repository contains an experimental, hobby project that explores AI-enabled features for a team/organization planning app similar in spirit to the proprietary "Planning Center". The goal is to contribute to the open source ecosystem: demonstrate automation and AI workflows, and invite others to read, test, and contribute.
+> An experimental, hobby project demonstrating AI-enabled features for a planning app in the same space as the proprietary "Planning Center." Open to contributors.
 
-Short project purpose
-- A hobby/open-source effort to expose AI capabilities in workflows for church/team planning.
-- Not affiliated with Planning Center; intended as an educational/demo contribution.
-- Contributions welcome: issues, PRs, and discussions.
+## Overview
+openPlanning is a small, community-driven project that explores how AI can assist in team and event planning workflows (targeted at church/team organisers). The project is educational and experimental — not affiliated with any commercial product. It demonstrates automation, reverse-engineering workflows, and integrations using React Native + Expo plus supporting tooling.
 
-Primary technologies and tools used
-- JavaScript / TypeScript (TypeScript config in tsconfig.json)
-- React + React Native (react, react-native)
-- Expo (expo SDK and scripts)
-- PocketBase (pocketbase client used in code)
-- Expo modules: expo-secure-store, expo-status-bar, react-native-safe-area-context, react-native-web
-- Build / analysis tooling used previously but not tracked in history: jadx, apktool (jar binaries were present but removed from git history)
+This repository intentionally avoids shipping large generated binaries in Git history; see "Repository artifacts & history" below for details.
 
-How the repo is organized (high level)
-- src/ — application source (React / TypeScript files)
-- android/, ios/ or .expo/ — platform-specific metadata (if present)
-- backend/ — (if present) backend or server-side code
-- tools/ — helper tools (jar binaries were here; large tool jars were removed from history and should be downloaded as needed)
-- apk/, apktool_out/, extracted/, decompiled/, analysis/ — generated artifacts and reverse-engineering outputs (archived locally and removed from git history to keep the repo pushable)
+---
 
-Why large files were removed from history
-- GitHub rejects files larger than 100 MB. The repo contained large jars and APKs that prevented pushing.
-- To keep the repo usable for contributors the large artifacts were removed from the repository history while keeping local backups and a remote backup branch.
+## Project goals
+- Explore AI-assisted features for planning and team coordination.
+- Provide a lightweight, open-source demo that others can read, run, and extend.
+- Offer a playground for automation, experimentation, and small contributions.
 
-Where to find the archived artifacts locally
-- A tarball was created with the removed artifacts and left in the repo root:
-  ./backup_artifacts_20261020_150209.tar.gz
-  (If you need only particular artifacts you can extract and copy them out of that tarball.)
+---
 
-How to restore archived artifacts locally
-- From the repository root:
-  tar -xzf backup_artifacts_20261020_150209.tar.gz
-- This will recreate the apk/, apktool_out/, extracted/, decompiled/, analysis/, and tools/ folders in your working tree.
+## Key technologies
+- JavaScript / TypeScript
+- React + React Native (Expo)
+- Expo SDK (project scripts in package.json)
+- PocketBase (lightweight backend used in the code)
+- Build/analysis tools used locally (jadx, apktool) — not tracked in git history
 
-Remote backup branch (original history)
-- Before rewriting history, a remote backup branch containing the original commits was pushed:
-  origin/backup-before-history-clean-20261020_150209
-- That branch contains the original large blobs. Use it only if you need a full copy of the repository history. Note: it may still contain large files that GitHub's web UI won't show or download easily.
+---
 
-Setup / developer quickstart
-Prerequisites (recommended)
-- Node.js (LTS, tested with recent Node 18+ / 20+)
-- npm (bundled with Node) or yarn
-- expo-cli (optional, for running expo commands): npm install -g expo-cli
-- Java / Android SDK (if you plan to run android builds via expo run:android)
+## Repository layout (high level)
+- `src/` — application source (React & TypeScript)
+- `backend/` — optional backend code (if present)
+- `.expo/`, `android/`, `ios/` — platform metadata (when present)
+- `tools/` — helper tools (large jars were removed from history; download as needed)
+- `apk/`, `apktool_out/`, `extracted/`, `decompiled/`, `analysis/` — generated/reverse-engineering artifacts (archived locally, not tracked)
 
-Common commands
-- Install dependencies:
-  npm install
+---
 
-- Type-check the TypeScript source:
-  npm run typecheck
+## Getting started (developer quickstart)
+Prerequisites (recommended):
+- Node.js (LTS)
+- npm or yarn
+- Optional: expo-cli for running on devices/simulators
 
-- Start the Expo development server (web + device tunneling):
-  npm start
+Install dependencies:
 
-- Run on Android device/emulator (requires Android toolchain):
-  npm run android   # runs `expo run:android`
+```bash
+npm install
+# or
+# yarn install
+```
 
-- Run on iOS simulator (macOS + Xcode required):
-  npm run ios       # runs `expo run:ios`
+Type-check the source:
 
-Notes about node_modules
-- node_modules/ is intentionally not tracked (should be in .gitignore). Do not commit it — run npm install locally or in CI.
+```bash
+npm run typecheck
+```
 
-If you need the large files in the repository long-term
-- Use Git LFS for large binaries and run `git lfs migrate import` to move large blobs to LFS (this still rewrites history).
-- Or store binary artifacts (APKs, tool jars) in a separate archival repo or object storage (S3, GCS) and link from this repository.
+Start the Expo dev server:
 
-Contributor guidance and collaboration notes
-- After the history rewrite the remote master was force-updated. If you cloned the project before the change, the easiest and safest option is to re-clone:
-  git clone https://github.com/CaluseruMarcos/openPlanning.git
+```bash
+npm start
+```
 
-- If you must keep a local clone and have no uncommitted work, run:
-  git fetch origin
-  git checkout master
-  git reset --hard origin/master
-  git clean -fdx
+Run on Android (requires Android SDK):
 
-- If you have local changes you want to preserve:
-  git branch save-local-changes
-  git format-patch origin/master --stdout > my-changes.patch
-  or stash/commit your work to a new branch, then reapply after re-cloning.
+```bash
+npm run android
+```
 
-- If a collaborator needs the original history or large blobs, they can fetch the backup remote branch:
-  git fetch origin backup-before-history-clean-20261020_150209
-  git checkout -b original-history origin/backup-before-history-clean-20261020_150209
+Run on iOS (macOS + Xcode):
 
-Contributing
-- This project is a hobby contribution aimed at demonstrating AI features for planning/team workflows.
-- Please open issues and PRs. Small focused PRs are easiest to review.
-- Avoid committing large binary artifacts to the main history. Use archives, releases, or Git LFS if binaries are needed.
+```bash
+npm run ios
+```
 
-License & attribution
-- This project is not affiliated with Planning Center. It is an independent hobby/demo project intended for learning and contributions.
+---
 
-Help & coordination
-- If you want the archived artifacts uploaded to a releases page, moved to a separate archive repo, or migrated to Git LFS, I can help automate that. Tell me which option you prefer (release vs separate repo vs LFS) and I will run the steps.
+## Repository artifacts & history (important)
+To keep the GitHub repository usable, large generated artifacts were removed from the repository history. This project previously contained APKs, decompiled outputs, and large tool jars that exceeded GitHub's file-size limits.
 
-Thanks — contributions and questions are welcome.
+What was removed from history and current commits:
+- `apk/`, `apktool_out/`, `extracted/`, `decompiled/`, `analysis/`
+- Large jars under `tools/` (e.g. `tools/jadx/lib/jadx-1.5.1-all.jar`, `tools/apktool.jar`)
+
+What we did instead:
+1. Created a local tarball backup of the removed artifacts and left it on disk (not tracked in git):
+   - `backup_artifacts_20261020_150209.tar.gz` (also copied to `/home/marcos/backup_artifacts_20261020_150209.tar.gz`)
+2. Rewrote the git history to remove the large blobs and force-pushed the cleaned history to `origin/master` so GitHub accepts pushes.
+3. Preserved a remote backup branch (created before the rewrite): `backup-before-history-clean-20261020_150209`.
+
+Restore local artifacts from the tarball:
+
+```bash
+# from the repository root
+tar -xzf backup_artifacts_20261020_150209.tar.gz
+```
+
+Access the original (uncleaned) history if necessary:
+
+```bash
+# fetch then checkout the backup branch (it contains large blobs)
+git fetch origin backup-before-history-clean-20261020_150209
+git checkout -b original-history origin/backup-before-history-clean-20261020_150209
+```
+
+**WARNING:** that backup branch contains very large blobs and may be inconvenient to work with on GitHub.
+
+---
+
+## Why this approach
+GitHub blocks files larger than 100 MB and keeping these artifacts in history prevents pushing and collaboration. Removing large blobs from history keeps the repository small and practical while preserving local access to the artifacts for reverse engineering.
+
+If you want to keep large binaries associated with the project long-term, recommended options:
+- Use Git LFS and migrate large binaries into LFS (requires history rewrite and collaborators to use Git LFS).
+- Host binary artifacts in a separate archive repository or object storage (S3/GCS) and reference them from here.
+
+---
+
+## Collaboration notes (after history rewrite)
+If you cloned this repository before the cleanup, the simplest way to continue is to re-clone:
+
+```bash
+# safe, recommended
+git clone https://github.com/CaluseruMarcos/openPlanning.git
+```
+
+If you must update an existing clone (and have no local uncommitted work):
+
+```bash
+git fetch origin
+git checkout master
+git reset --hard origin/master
+git clean -fdx
+```
+
+If you have local changes to keep, create patches or branch them before resetting:
+
+```bash
+git branch save-local-changes
+git format-patch origin/master --stdout > my-changes.patch
+# or stash/commit to a new branch, then reapply after re-cloning
+```
+
+---
+
+## Contributing
+This is a hobby, community project. Contributions are welcome:
+- Open issues to discuss bugs or features
+- Send focused pull requests (small, incremental changes are easiest to review)
+- Please avoid committing large binary artifacts to the main history
+
+If you want the artifacts publicly available for contributors, we can:
+- Add them to a GitHub release as binary assets, or
+- Move them to a separate archival repo or cloud storage and link from this README
+
+---
+
+## License & disclaimer
+- This project is not affiliated with Planning Center. It is an independent hobby/demo project for learning and contribution.
+- Use and contribution are at your own risk; check third-party licenses for any bundled tools or binaries you use locally.
+
+---
+
+## Need help?
+If you want me to:
+- Upload the artifacts to a GitHub release or to a separate archival repo
+- Convert large binaries to Git LFS and migrate history
+- Add CONTRIBUTING.md or CODE_OF_CONDUCT.md
+
+Tell me which option and I will run the steps.
+
+Thanks for your interest — contributions and discussion are welcome.
