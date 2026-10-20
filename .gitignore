@@ -24,3 +24,6 @@ analysis/
 
 # Local env
 .env
+
+# Backups and archives
+backup_artifacts_*.tar.gz
