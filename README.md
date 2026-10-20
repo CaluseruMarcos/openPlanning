@@ -7,54 +7,98 @@ Short project purpose
 - Not affiliated with Planning Center; intended as an educational/demo contribution.
 - Contributions welcome: issues, PRs, and discussions.
 
-Important Git / repo history notes (read before pulling/pushing)
-- To make the repository pushable to GitHub we removed very large generated artifacts from the repository history (APKs, decompiled output, and large tool jars). This rewrite required a forced update to the remote history.
-- What was removed from current commits and from history: apk/, apktool_out/, extracted/, decompiled/, analysis/, and large jar files under tools/ (for example: tools/jadx/lib/jadx-1.5.1-all.jar and tools/apktool.jar).
-- Backup of original artifacts: a tarball of the removed artifacts was created and saved in the repo root at:
-  ./backup_artifacts_20261020_150209.tar.gz
-  (Size: ~253 MB). The tarball and your local working-tree copies keep your ability to continue reverse engineering locally.
-- A remote backup branch containing the original history was pushed before the rewrite. Its name is:
-  backup-before-history-clean-20261020_150209
-  (It contains the original commits including the large blobs.)
+Primary technologies and tools used
+- JavaScript / TypeScript (TypeScript config in tsconfig.json)
+- React + React Native (react, react-native)
+- Expo (expo SDK and scripts)
+- PocketBase (pocketbase client used in code)
+- Expo modules: expo-secure-store, expo-status-bar, react-native-safe-area-context, react-native-web
+- Build / analysis tooling used previously but not tracked in history: jadx, apktool (jar binaries were present but removed from git history)
 
-If you cloned the repository before this history rewrite
-- Recommended (clean and safe): delete your local clone and re-clone the repository fresh:
+How the repo is organized (high level)
+- src/ — application source (React / TypeScript files)
+- android/, ios/ or .expo/ — platform-specific metadata (if present)
+- backend/ — (if present) backend or server-side code
+- tools/ — helper tools (jar binaries were here; large tool jars were removed from history and should be downloaded as needed)
+- apk/, apktool_out/, extracted/, decompiled/, analysis/ — generated artifacts and reverse-engineering outputs (archived locally and removed from git history to keep the repo pushable)
+
+Why large files were removed from history
+- GitHub rejects files larger than 100 MB. The repo contained large jars and APKs that prevented pushing.
+- To keep the repo usable for contributors the large artifacts were removed from the repository history while keeping local backups and a remote backup branch.
+
+Where to find the archived artifacts locally
+- A tarball was created with the removed artifacts and left in the repo root:
+  ./backup_artifacts_20261020_150209.tar.gz
+  (If you need only particular artifacts you can extract and copy them out of that tarball.)
+
+How to restore archived artifacts locally
+- From the repository root:
+  tar -xzf backup_artifacts_20261020_150209.tar.gz
+- This will recreate the apk/, apktool_out/, extracted/, decompiled/, analysis/, and tools/ folders in your working tree.
+
+Remote backup branch (original history)
+- Before rewriting history, a remote backup branch containing the original commits was pushed:
+  origin/backup-before-history-clean-20261020_150209
+- That branch contains the original large blobs. Use it only if you need a full copy of the repository history. Note: it may still contain large files that GitHub's web UI won't show or download easily.
+
+Setup / developer quickstart
+Prerequisites (recommended)
+- Node.js (LTS, tested with recent Node 18+ / 20+)
+- npm (bundled with Node) or yarn
+- expo-cli (optional, for running expo commands): npm install -g expo-cli
+- Java / Android SDK (if you plan to run android builds via expo run:android)
+
+Common commands
+- Install dependencies:
+  npm install
+
+- Type-check the TypeScript source:
+  npm run typecheck
+
+- Start the Expo development server (web + device tunneling):
+  npm start
+
+- Run on Android device/emulator (requires Android toolchain):
+  npm run android   # runs `expo run:android`
+
+- Run on iOS simulator (macOS + Xcode required):
+  npm run ios       # runs `expo run:ios`
+
+Notes about node_modules
+- node_modules/ is intentionally not tracked (should be in .gitignore). Do not commit it — run npm install locally or in CI.
+
+If you need the large files in the repository long-term
+- Use Git LFS for large binaries and run `git lfs migrate import` to move large blobs to LFS (this still rewrites history).
+- Or store binary artifacts (APKs, tool jars) in a separate archival repo or object storage (S3, GCS) and link from this repository.
+
+Contributor guidance and collaboration notes
+- After the history rewrite the remote master was force-updated. If you cloned the project before the change, the easiest and safest option is to re-clone:
   git clone https://github.com/CaluseruMarcos/openPlanning.git
 
-- Alternative (if you understand git and have NO local uncommitted changes): in your existing clone you can run:
+- If you must keep a local clone and have no uncommitted work, run:
   git fetch origin
   git checkout master
   git reset --hard origin/master
   git clean -fdx
-  This will force your local master to match the rewritten origin/master and remove untracked files.
 
-- If you have local changes you want to keep: create patches or a branch first before resetting:
+- If you have local changes you want to preserve:
   git branch save-local-changes
   git format-patch origin/master --stdout > my-changes.patch
-  or use git stash or git bundle to export your work, then reapply after re-cloning.
+  or stash/commit your work to a new branch, then reapply after re-cloning.
 
-How to access the original history or artifacts
-- If you need the original commit history with large blobs (for forensic or archival reasons), the remote backup branch is available:
+- If a collaborator needs the original history or large blobs, they can fetch the backup remote branch:
   git fetch origin backup-before-history-clean-20261020_150209
   git checkout -b original-history origin/backup-before-history-clean-20261020_150209
-  Note: that branch contains the large blobs (GitHub may block access for very large files depending on your remote policy).
-- If you only need the artifacts (APKs, decompiled files, tools) you can extract the tarball saved in the repo root:
-  tar -xzf backup_artifacts_20261020_150209.tar.gz
-
-Why we did this
-- GitHub blocks files larger than 100 MB. The tracked jars/APKs prevented pushing. To keep the repository small and usable while retaining a local copy of the artifacts for reverse engineering, we:
-  1) created a local backup tarball, and
-  2) rewrote history to remove the large blobs, then force-pushed the cleaned history.
-
-If you want the large files in the repo long-term
-- Consider using Git LFS and migrating heavy files into LFS, or host the binary artifacts in a separate archive repository or object storage (S3). I can help set that up if desired.
 
 Contributing
 - This project is a hobby contribution aimed at demonstrating AI features for planning/team workflows.
 - Please open issues and PRs. Small focused PRs are easiest to review.
-- If you're adding large binary artifacts for testing, please use a separate archive (not the main git history) or Git LFS.
+- Avoid committing large binary artifacts to the main history. Use archives, releases, or Git LFS if binaries are needed.
 
-Contact / coordination
-- If you need the archived artifacts moved to a different place (a release asset, a separate repo, or object storage), or if you want help instructing other collaborators how to migrate, tell me and I will help.
+License & attribution
+- This project is not affiliated with Planning Center. It is an independent hobby/demo project intended for learning and contributions.
 
-Thank you for your interest — contributions and questions are welcome.
+Help & coordination
+- If you want the archived artifacts uploaded to a releases page, moved to a separate archive repo, or migrated to Git LFS, I can help automate that. Tell me which option you prefer (release vs separate repo vs LFS) and I will run the steps.
+
+Thanks — contributions and questions are welcome.
