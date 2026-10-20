@@ -2,3 +2,25 @@ node_modules/
 .expo/
 dist/
 *.log
+# Android / Java Build Artifacts
+*.jar
+*.aar
+android/app/build/
+android/.gradle/
+android/build/
+
+# Tools
+tools/
+
+# Generated / decompiled artifacts
+apk/
+apktool_out/
+decompiled/
+extracted/
+analysis/
+
+# Build outputs
+*.apk
+
+# Local env
+.env
