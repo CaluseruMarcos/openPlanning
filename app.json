@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Open Services",
+    "slug": "open-services",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "open-services",
+    "android": {
+      "package": "com.openservices.rebuild"
+    },
+    "ios": {
+      "bundleIdentifier": "com.openservices.rebuild"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

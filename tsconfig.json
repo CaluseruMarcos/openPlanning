@@ -1,0 +1,13 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true
+  },
+  "exclude": [
+    "apktool_out",
+    "decompiled",
+    "extracted",
+    "node_modules"
+  ]
+}

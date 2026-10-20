@@ -1,0 +1,146 @@
+#!/usr/bin/env node
+// Seeds demo users, conversations, and messages through the PocketBase API.
+// Requires the server to be running (./start.sh) and the admin credentials below.
+//
+// Usage:
+//   node seed.mjs
+//   PB_URL=http://127.0.0.1:8090 PB_ADMIN_EMAIL=... PB_ADMIN_PASSWORD=... node seed.mjs
+
+const BASE_URL = process.env.PB_URL ?? "http://127.0.0.1:8090";
+const ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL ?? "admin@openservices.local";
+const ADMIN_PASSWORD = process.env.PB_ADMIN_PASSWORD ?? "devpassword";
+const DEMO_PASSWORD = process.env.PB_DEMO_PASSWORD ?? "openservices";
+
+async function request(path, { method = "GET", token, body } = {}) {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    method,
+    headers: {
+      ...(token ? { Authorization: token } : {}),
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    throw new Error(`${method} ${path} -> ${response.status}: ${text}`);
+  }
+
+  return data;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function main() {
+  const auth = await request("/api/collections/_superusers/auth-with-password", {
+    method: "POST",
+    body: { identity: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+  });
+  const token = auth.token;
+
+  async function findUser(email) {
+    const result = await request(
+      `/api/collections/users/records?perPage=1&filter=${encodeURIComponent(`email = "${email}"`)}`,
+      { token },
+    );
+    return result.items[0] ?? null;
+  }
+
+  async function ensureUser(email, name) {
+    const existing = await findUser(email);
+    if (existing) {
+      return existing;
+    }
+
+    const created = await request("/api/collections/users/records", {
+      method: "POST",
+      token,
+      body: {
+        email,
+        password: DEMO_PASSWORD,
+        passwordConfirm: DEMO_PASSWORD,
+        name,
+      },
+    });
+    console.log(`created user ${email}`);
+    return created;
+  }
+
+  const marcos = await ensureUser("marcos@example.com", "Marcos");
+  const sarah = await ensureUser("sarah@example.com", "Sarah Chen");
+  const michael = await ensureUser("michael@example.com", "Michael Johnson");
+
+  const existingConversations = await request(
+    "/api/collections/conversations/records?perPage=1",
+    { token },
+  );
+
+  if (existingConversations.items.length > 0) {
+    console.log("conversations already exist — skipping conversation seed");
+    console.log(`demo login: marcos@example.com / ${DEMO_PASSWORD}`);
+    return;
+  }
+
+  async function createConversation({ title, kind, participants }) {
+    return request("/api/collections/conversations/records", {
+      method: "POST",
+      token,
+      body: {
+        title,
+        kind,
+        created_by: marcos.id,
+        participants: participants.map((user) => user.id),
+      },
+    });
+  }
+
+  async function createMessage(conversation, author, body) {
+    await request("/api/collections/messages/records", {
+      method: "POST",
+      token,
+      body: {
+        conversation: conversation.id,
+        author: author.id,
+        body,
+      },
+    });
+    await sleep(30);
+  }
+
+  const worship = await createConversation({
+    title: "Worship Team",
+    kind: "team",
+    participants: [marcos, sarah, michael],
+  });
+  await createMessage(
+    worship,
+    sarah,
+    "I added the set list for this Sunday. Please review the transitions.",
+  );
+  await createMessage(worship, michael, "Looks great. I can bring the extra DI box.");
+
+  const direct = await createConversation({
+    title: "Sarah Chen",
+    kind: "direct",
+    participants: [marcos, sarah],
+  });
+  await createMessage(direct, sarah, "Could you confirm the rehearsal time?");
+
+  const planning = await createConversation({
+    title: "Service Planning",
+    kind: "group",
+    participants: [marcos, sarah, michael],
+  });
+  await createMessage(planning, michael, "The plan is ready for review.");
+
+  console.log("seeded 3 conversations and 4 messages");
+  console.log(`demo login: marcos@example.com / ${DEMO_PASSWORD}`);
+  console.log(`secondary:  sarah@example.com / ${DEMO_PASSWORD}`);
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
