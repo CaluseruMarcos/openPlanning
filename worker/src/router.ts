@@ -812,9 +812,12 @@ export async function handleApiRequest(
   }
 
   if (path === "/auth/signup" && method === "POST") {
+    // Registration needs a valid invite code, and a code works only once.
+    // That is the real limit, so the throttle here is only a backstop against
+    // a script that leaks many codes at once.
     const perIp = throttle(
       `signup:${clientIp(request)}`,
-      20,
+      200,
       60 * 60 * 1000,
     );
     if (!perIp.allowed) {

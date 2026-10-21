@@ -1,15 +1,15 @@
 # Cloudflare Workers migration sketch
 
 Status: **implemented and deployed** — the Worker API, D1 schema, UserHub Durable
-Object, WebSocket protocol, and client adapter are implemented on this branch,
-and the Worker runs on the Cloudflare Free plan at
+Object, WebSocket protocol, and client adapter are implemented, and the Worker
+runs on the Cloudflare Free plan at
 `https://open-services-api.snorlaxking310.workers.dev`. Remaining gaps are listed
 in the implementation notes below.
 
-Branch: `cloudflare-migration` (created from `master` at `570f7da`). The design
-sketch was committed first; implementation lives under `worker/` and in
-`src/api/pocketbase.ts`. See [`worker/README.md`](../worker/README.md) for run and
-deployment commands.
+The work started on the branch `cloudflare-migration` (created from `master` at
+`570f7da`) and was merged into `master`. The implementation lives under
+`worker/` and in `src/api/pocketbase.ts`. See
+[`worker/README.md`](../worker/README.md) for run and deployment commands.
 
 ## 1. Decision summary
 

@@ -233,8 +233,9 @@ matters for operating this Worker:
   instead of falling back to a known key.
 - Sign-in and sign-up are throttled per client address
   (`429` with `Retry-After`): 10 attempts per account and 50 per address per
-  10 minutes for sign-in, 20 registrations per address per hour. Set
-  `ALLOW_SIGNUP = "false"` to close registration entirely.
+  10 minutes for sign-in, 200 registrations per address per hour. The sign-up
+  limit is only a backstop, because a valid invite code is required anyway and
+  a code works only once.
 - Every response carries `Cache-Control: no-store`, `X-Content-Type-Options:
   nosniff`, `Strict-Transport-Security`, `Referrer-Policy` and
   `Content-Security-Policy: default-src 'none'`.
