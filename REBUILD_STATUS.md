@@ -3,6 +3,12 @@
 Updated 2026-10-21. This tracks the local Expo rebuild in this repository (not the
 reverse-engineering report under `analysis/`).
 
+> **Cloudflare migration (current):** the Expo client now targets the Cloudflare
+> Worker backend in `worker/` (D1 + UserHub Durable Object + WebSocket). The
+> PocketBase details below describe the earlier backend and remain available
+> under `backend/` as a reference/rollback path. See `worker/README.md` for the
+> current setup and `docs/cloudflare-migration.md` for the design.
+
 ## What was broken
 
 The app bundled and rendered the conversation list, but the interaction layer was

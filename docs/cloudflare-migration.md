@@ -1,9 +1,14 @@
 # Cloudflare Workers migration sketch
 
-Status: **design sketch only** — no Worker, D1, Durable Object, or client code is
-implemented on this branch yet.
+Status: **initial implementation** — the Worker API, D1 schema, UserHub Durable
+Object, WebSocket protocol, and client adapter are implemented on this branch.
+Deployment still requires real Cloudflare resources, secrets, and the production
+checks listed below.
 
-Branch: `cloudflare-migration` (created from `master` at `570f7da`).
+Branch: `cloudflare-migration` (created from `master` at `570f7da`). The design
+sketch was committed first; implementation lives under `worker/` and in
+`src/api/pocketbase.ts`. See [`worker/README.md`](../worker/README.md) for run and
+deployment commands.
 
 ## 1. Decision summary
 
@@ -697,6 +702,40 @@ Do this migration only if one of these becomes true:
 - the project wants a fully edge-hosted, no-server architecture
 
 If that happens, this document is the starting point for the rewrite.
+
+## Implementation notes (current branch)
+
+The first implementation is in place:
+
+- `worker/migrations/0001_init.sql` — D1 schema from section 5.
+- `worker/src/auth.ts` — PBKDF2 passwords, HMAC-hashed session tokens, signed
+  short-lived WebSocket tickets.
+- `worker/src/router.ts` — auth, people, conversation, message, reaction, read,
+  typing, search, and ticket routes.
+- `worker/src/db.ts` — membership-scoped queries and API serializers.
+- `worker/src/realtime.ts` — `UserHub` Durable Object with WebSocket hibernation
+  and fan-out.
+- `worker/seed.mjs` — idempotent demo workspace for local development.
+- `src/api/pocketbase.ts` — now an HTTP/WebSocket adapter; it preserves the
+  existing exported function signatures and the `POCKETBASE_URL` alias.
+- `src/hooks/useWorkspace.ts` — refetches conversations and the open thread after
+  a realtime reconnect.
+
+Verified locally with `wrangler dev`, D1 migrations, HTTP smoke tests, and
+two WebSocket clients covering message, typing, read, reaction, edit, delete, and
+conversation-delete fan-out. Both `npm run typecheck` and
+`npm run typecheck:worker` pass, and the web bundle exports successfully.
+
+Known gaps before calling the migration production-ready:
+
+- The Workers Free 10 ms CPU limit may reject PBKDF2 password hashing. This has
+  not been measured on a real Workers deployment. Do not lower the password work
+  factor to fit; use Workers Paid or an external auth provider.
+- No rate limiting, email verification, password reset, or admin dashboard.
+- No PocketBase data import or password migration; the supported path is a fresh
+  D1 database plus the seed script.
+- Attachments are still a placeholder; the R2 binding is reserved but unused.
+- The client caps pagination at 10 pages (1,000 messages/conversations).
 
 ## References
 

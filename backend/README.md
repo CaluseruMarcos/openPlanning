@@ -1,7 +1,12 @@
-# Open Services backend (PocketBase)
+# Open Services backend (PocketBase, legacy)
 
-Local, self-hostable backend for the rebuild. PocketBase is MIT-licensed and ships
-as a single binary with SQLite, auth, realtime, and an admin dashboard.
+> **Current backend:** the Expo client now targets the Cloudflare Worker in
+> [`worker/`](../worker/README.md). This PocketBase setup remains as a reference
+> and rollback path; the client no longer imports the PocketBase SDK or the SSE
+> polyfill.
+
+Local, self-hostable backend for the earlier rebuild. PocketBase is MIT-licensed
+and ships as a single binary with SQLite, auth, realtime, and an admin dashboard.
 
 ## Requirements
 

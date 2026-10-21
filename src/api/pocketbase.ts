@@ -1,12 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
-import PocketBase, {
-  BaseAuthStore,
-  ClientResponseError,
-  type AuthRecord,
-  type RecordModel,
-} from "pocketbase";
 import { Platform } from "react-native";
 
 import type {
@@ -18,8 +12,8 @@ import type {
   TypingIndicator,
 } from "../types";
 
-const AUTH_KEY = "open-services-auth";
-const API_PORT = 8090;
+const AUTH_KEY = "open-services-auth-v2";
+const API_PORT = 8787;
 
 const DEFAULT_URL =
   Platform.OS === "android"
@@ -83,21 +77,19 @@ function developmentApiUrl(): string | null {
   return null;
 }
 
-const configuredUrl = process.env.EXPO_PUBLIC_POCKETBASE_URL?.trim();
+const configuredUrl =
+  process.env.EXPO_PUBLIC_API_URL?.trim() ||
+  process.env.EXPO_PUBLIC_POCKETBASE_URL?.trim();
 
-export const POCKETBASE_URL = normalizeBaseUrl(
+export const API_URL = normalizeBaseUrl(
   configuredUrl || developmentApiUrl() || DEFAULT_URL,
 );
 
-// PocketBase realtime uses the global EventSource, which React Native does not
-// provide. The web build already has a native implementation.
-if (
-  Platform.OS !== "web" &&
-  typeof (globalThis as { EventSource?: unknown }).EventSource === "undefined"
-) {
-  const EventSourcePolyfill = require("react-native-sse").default;
-  (globalThis as { EventSource?: unknown }).EventSource = EventSourcePolyfill;
-}
+/**
+ * Compatibility alias. The app used to point this at PocketBase; screens still
+ * display the resolved server URL under this name.
+ */
+export const POCKETBASE_URL = API_URL;
 
 const authStorage = {
   getItem: (key: string) =>
@@ -114,130 +106,393 @@ const authStorage = {
       : SecureStore.deleteItemAsync(key),
 };
 
-class PersistentAuthStore extends BaseAuthStore {
-  private hydrating = false;
-
-  async hydrate(): Promise<void> {
-    this.hydrating = true;
-    try {
-      const serialized = await authStorage.getItem(AUTH_KEY);
-      if (!serialized) return;
-      const parsed = JSON.parse(serialized) as {
-        token?: string;
-        record?: AuthRecord;
-      };
-      if (parsed?.token) {
-        super.save(parsed.token, parsed.record ?? null);
-      }
-    } catch {
-      // A corrupt or unreadable token should behave like a signed-out session.
-    } finally {
-      this.hydrating = false;
-    }
-  }
-
-  save(token: string, record?: AuthRecord): void {
-    super.save(token, record);
-    if (this.hydrating) return;
-    void authStorage
-      .setItem(AUTH_KEY, JSON.stringify({ token, record: record ?? null }))
-      .catch(() => undefined);
-  }
-
-  clear(): void {
-    super.clear();
-    void authStorage.removeItem(AUTH_KEY).catch(() => undefined);
-  }
-}
-
-export const authStore = new PersistentAuthStore();
-export const pb = new PocketBase(POCKETBASE_URL, authStore);
-// Message fetches and message searches share the same endpoint; automatic
-// cancellation would make them abort each other.
-pb.autoCancellation(false);
-
-type PBUserRecord = RecordModel & { name?: string; email?: string };
-
-type PBConversation = RecordModel & {
-  title: string;
-  kind: "direct" | "team" | "group";
-  created_by: string;
-  participants: string[];
-  last_message_preview?: string;
-  last_message_at?: string;
-  last_message_author?: string;
-  expand?: { participants?: PBUserRecord[] };
-};
-
-type PBMessage = RecordModel & {
-  conversation: string;
-  author: string;
-  body: string;
-  created: string;
-  reply_to?: string;
-  edited_at?: string;
-  expand?: {
-    author?: PBUserRecord;
-    reply_to?: PBMessage;
-  };
-};
-
-type PBReaction = RecordModel & {
-  message: string;
-  user: string;
-  emoji: string;
-  created: string;
-  expand?: { user?: PBUserRecord };
-};
-
-type PBConversationRead = RecordModel & {
-  conversation: string;
-  user: string;
-  last_read_message?: string;
-  last_read_at: string;
-  expand?: { user?: PBUserRecord };
-};
-
-type PBTypingIndicator = RecordModel & {
-  conversation: string;
-  user: string;
-  last_seen: string;
-};
-
 export type SessionUser = {
   id: string;
   name: string;
   email: string;
 };
 
-export type MessageSubscriptionEvent = {
-  action: string;
-  record: PBMessage;
-  message?: Message;
+type StoredAuth = {
+  token: string;
+  user: SessionUser;
 };
 
-export type ConversationSubscriptionEvent = {
-  action: string;
-  record: PBConversation;
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+let authToken: string | null = null;
+let authUser: SessionUser | null = null;
+let hydratePromise: Promise<void> | null = null;
+let hydrated = false;
+
+async function hydrateAuth(): Promise<void> {
+  if (hydrated) return;
+  if (!hydratePromise) {
+    hydratePromise = (async () => {
+      try {
+        const serialized = await authStorage.getItem(AUTH_KEY);
+        if (!serialized) return;
+        const parsed = JSON.parse(serialized) as Partial<StoredAuth>;
+        if (
+          typeof parsed.token === "string" &&
+          parsed.user &&
+          typeof parsed.user.id === "string" &&
+          typeof parsed.user.name === "string" &&
+          typeof parsed.user.email === "string"
+        ) {
+          authToken = parsed.token;
+          authUser = parsed.user;
+        }
+      } catch {
+        // A corrupt or unreadable token behaves like a signed-out session.
+      } finally {
+        hydrated = true;
+      }
+    })();
+  }
+  await hydratePromise;
+}
+
+async function saveAuth(token: string, user: SessionUser): Promise<void> {
+  authToken = token;
+  authUser = user;
+  hydrated = true;
+  await authStorage
+    .setItem(AUTH_KEY, JSON.stringify({ token, user }))
+    .catch(() => undefined);
+}
+
+async function clearAuth(): Promise<void> {
+  authToken = null;
+  authUser = null;
+  hydrated = true;
+  await authStorage.removeItem(AUTH_KEY).catch(() => undefined);
+}
+
+type ApiOptions = RequestInit & { auth?: boolean };
+
+type ErrorBody = {
+  error?: { code?: string; message?: string };
+  message?: string;
 };
 
-export type ReactionSubscriptionEvent = {
-  action: string;
-  record: PBReaction;
-  reaction?: Reaction;
+async function apiFetch<T>(
+  path: string,
+  options: ApiOptions = {},
+): Promise<T> {
+  await hydrateAuth();
+
+  const { auth = true, ...init } = options;
+  const headers = new Headers(init.headers);
+  headers.set("Accept", "application/json");
+  if (init.body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (auth && authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { ...init, headers });
+  } catch {
+    throw new ApiError(
+      0,
+      "network_error",
+      `Can't reach the Open Services server at ${API_URL}.`,
+    );
+  }
+
+  const text = await response.text();
+  let parsed: unknown = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (!response.ok) {
+    const body = (parsed ?? {}) as ErrorBody;
+    const message =
+      body.error?.message ||
+      body.message ||
+      (response.status === 401
+        ? "Your session expired. Please sign in again."
+        : "Something went wrong.");
+    const code = body.error?.code ?? "http_error";
+
+    if (response.status === 401 && auth) {
+      realtime.close();
+      void clearAuth();
+    }
+    throw new ApiError(response.status, code, message);
+  }
+
+  if (response.status === 204 || !text) {
+    return undefined as T;
+  }
+  return parsed as T;
+}
+
+type ApiPerson = {
+  id: string;
+  name: string;
 };
 
-export type ConversationReadSubscriptionEvent = {
-  action: string;
-  record: PBConversationRead;
-  read?: ConversationRead;
+type ApiConversation = {
+  id: string;
+  title: string;
+  kind: "direct" | "team" | "group";
+  participants: ApiPerson[];
+  createdBy: string;
+  createdAt: string;
+  lastMessagePreview: string;
+  lastMessageAt: string;
+  lastMessageAuthorId: string;
 };
 
-export type TypingSubscriptionEvent = {
-  action: string;
-  record: PBTypingIndicator;
-  typing?: TypingIndicator;
+type ApiReply = {
+  id: string;
+  author: ApiPerson;
+  body: string;
 };
+
+type ApiReaction = {
+  id: string;
+  messageId: string;
+  emoji: string;
+  user: ApiPerson;
+  createdAtIso: string;
+};
+
+type ApiMessage = {
+  id: string;
+  conversationId: string;
+  author: ApiPerson;
+  body: string;
+  createdAt: string;
+  createdAtIso: string;
+  editedAt?: string;
+  replyTo: ApiReply | null;
+  reactions: ApiReaction[];
+};
+
+type ApiRead = {
+  id: string;
+  conversationId: string;
+  user: ApiPerson;
+  lastReadAt: string;
+  lastReadMessageId?: string;
+};
+
+type ApiUser = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+type ServerEvent =
+  | { type: "ready"; userId: string; connectedAt: string }
+  | { type: "pong" }
+  | { type: "message.created"; conversationId: string; message: ApiMessage }
+  | { type: "message.updated"; conversationId: string; message: ApiMessage }
+  | { type: "message.deleted"; conversationId: string; messageId: string }
+  | { type: "conversation.created"; conversation: ApiConversation }
+  | { type: "conversation.updated"; conversation: ApiConversation }
+  | { type: "conversation.deleted"; conversationId: string }
+  | { type: "reaction.added"; reaction: ApiReaction }
+  | {
+      type: "reaction.removed";
+      reactionId: string;
+      messageId: string;
+      conversationId: string;
+    }
+  | { type: "read.updated"; read: ApiRead }
+  | {
+      type: "typing.updated";
+      conversationId: string;
+      userId: string;
+      expiresAt: string;
+    }
+  | { type: "typing.stopped"; conversationId: string; userId: string }
+  | { type: "error"; code: string; message: string };
+
+type RealtimeStatus = "connecting" | "connected" | "disconnected";
+
+type RealtimeListener = (event: ServerEvent) => void;
+type StatusListener = (status: RealtimeStatus) => void;
+
+class RealtimeClient {
+  private socket: WebSocket | null = null;
+  private connecting: Promise<void> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private listeners = new Set<RealtimeListener>();
+  private statusListeners = new Set<StatusListener>();
+  private attempt = 0;
+  private manuallyClosed = false;
+
+  ensureConnected(): Promise<void> {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+    if (this.connecting) return this.connecting;
+
+    this.manuallyClosed = false;
+    this.setStatus("connecting");
+
+    this.connecting = (async () => {
+      const token = await hydrateAuth().then(() => authToken);
+      if (!token) {
+        throw new ApiError(401, "missing_session", "Sign in to continue.");
+      }
+
+      const { ticket } = await apiFetch<{ ticket: string }>(
+        "/api/realtime/ticket",
+        { method: "POST" },
+      );
+
+      const websocketUrl = `${API_URL.replace(/^http/i, "ws")}/api/realtime?ticket=${encodeURIComponent(ticket)}`;
+      const socket = new WebSocket(websocketUrl);
+      this.socket = socket;
+
+      socket.onopen = () => {
+        this.attempt = 0;
+        this.setStatus("connected");
+        if (this.pingTimer) clearInterval(this.pingTimer);
+        this.pingTimer = setInterval(() => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "ping" }));
+          }
+        }, 30_000);
+      };
+
+      socket.onmessage = (event) => {
+        if (typeof event.data !== "string") return;
+        let parsed: ServerEvent;
+        try {
+          parsed = JSON.parse(event.data) as ServerEvent;
+        } catch {
+          return;
+        }
+
+        if (parsed.type === "ready") {
+          this.setStatus("connected");
+        } else if (parsed.type !== "pong") {
+          for (const listener of this.listeners) listener(parsed);
+        }
+      };
+
+      socket.onclose = () => {
+        if (this.socket === socket) this.socket = null;
+        this.connecting = null;
+        if (this.pingTimer) {
+          clearInterval(this.pingTimer);
+          this.pingTimer = null;
+        }
+        this.setStatus("disconnected");
+        if (!this.manuallyClosed && this.listeners.size > 0) {
+          this.scheduleReconnect();
+        }
+      };
+
+      socket.onerror = () => {
+        try {
+          socket.close();
+        } catch {
+          // The close handler does the cleanup.
+        }
+      };
+    })()
+      .catch((error) => {
+        this.connecting = null;
+        this.setStatus("disconnected");
+        const unauthorized =
+          error instanceof ApiError && error.status === 401;
+        if (unauthorized) {
+          this.manuallyClosed = true;
+        } else if (!this.manuallyClosed && this.listeners.size > 0) {
+          this.scheduleReconnect();
+        }
+        throw error;
+      })
+      .finally(() => {
+        this.connecting = null;
+      });
+
+    return this.connecting;
+  }
+
+  on(prefix: string, listener: RealtimeListener): () => void {
+    const wrapped: RealtimeListener = (event) => {
+      if (event.type === prefix || event.type.startsWith(`${prefix}.`)) {
+        listener(event);
+      }
+    };
+    this.listeners.add(wrapped);
+    void this.ensureConnected().catch(() => undefined);
+    return () => {
+      this.listeners.delete(wrapped);
+    };
+  }
+
+  onStatus(listener: StatusListener): () => void {
+    this.statusListeners.add(listener);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
+  }
+
+  close(): void {
+    this.manuallyClosed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+    const socket = this.socket;
+    this.socket = null;
+    this.connecting = null;
+    try {
+      socket?.close();
+    } catch {
+      // The socket is already closed.
+    }
+    this.setStatus("disconnected");
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer || this.manuallyClosed) return;
+    const delay =
+      Math.min(30_000, 1_000 * 2 ** this.attempt) +
+      Math.floor(Math.random() * 500);
+    this.attempt += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.ensureConnected().catch(() => undefined);
+    }, delay);
+  }
+
+  private setStatus(status: RealtimeStatus): void {
+    for (const listener of this.statusListeners) listener(status);
+  }
+}
+
+const realtime = new RealtimeClient();
 
 const PERSON_COLORS = [
   "#5B61D6",
@@ -317,67 +572,43 @@ export function formatTimestamp(value?: string): string {
   return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(-2)}`;
 }
 
-function sessionUserFromRecord(record: AuthRecord): SessionUser | null {
-  if (!record?.id) return null;
-  const email = typeof record.email === "string" ? record.email : "";
-  const name =
-    typeof record.name === "string" && record.name.trim().length > 0
-      ? record.name.trim()
-      : email || "Member";
-  return { id: record.id, name, email };
-}
-
-function toMessage(record: PBMessage, reactions: Reaction[] = []): Message {
-  const replyRecord = record.expand?.reply_to;
-  const replyTo = record.reply_to
-    ? {
-        id: record.reply_to,
-        author: toPerson(
-          replyRecord?.expand?.author ?? {
-            id: replyRecord?.author ?? "unknown",
-            name: "Member",
-          },
-        ),
-        body: replyRecord?.body ?? "The original message is unavailable.",
-      }
-    : null;
-
+function toMessage(record: ApiMessage): Message {
   return {
     id: record.id,
-    conversationId: record.conversation,
-    author: toPerson(
-      record.expand?.author ?? { id: record.author, name: "Member" },
-    ),
+    conversationId: record.conversationId,
+    author: toPerson(record.author),
     body: record.body,
-    createdAt: formatTimestamp(record.created),
-    createdAtIso: record.created,
-    editedAt: record.edited_at || undefined,
-    replyTo,
-    reactions,
+    createdAt: formatTimestamp(record.createdAtIso),
+    createdAtIso: record.createdAtIso,
+    editedAt: record.editedAt || undefined,
+    replyTo: record.replyTo
+      ? {
+          id: record.replyTo.id,
+          author: toPerson(record.replyTo.author),
+          body: record.replyTo.body,
+        }
+      : null,
+    reactions: (record.reactions ?? []).map(toReaction),
   };
 }
 
-function toReaction(record: PBReaction): Reaction {
+function toReaction(record: ApiReaction): Reaction {
   return {
     id: record.id,
-    messageId: record.message,
+    messageId: record.messageId,
     emoji: record.emoji,
-    user: toPerson(
-      record.expand?.user ?? { id: record.user, name: "Member" },
-    ),
-    createdAtIso: record.created,
+    user: toPerson(record.user),
+    createdAtIso: record.createdAtIso,
   };
 }
 
-function toConversationRead(record: PBConversationRead): ConversationRead {
+function toConversationRead(record: ApiRead): ConversationRead {
   return {
     id: record.id,
-    conversationId: record.conversation,
-    user: toPerson(
-      record.expand?.user ?? { id: record.user, name: "Member" },
-    ),
-    lastReadAt: record.last_read_at,
-    lastReadMessageId: record.last_read_message || undefined,
+    conversationId: record.conversationId,
+    user: toPerson(record.user),
+    lastReadAt: record.lastReadAt,
+    lastReadMessageId: record.lastReadMessageId || undefined,
   };
 }
 
@@ -391,11 +622,11 @@ function dedupePeople(people: Person[]): Person[] {
 }
 
 function toConversation(
-  record: PBConversation,
+  record: ApiConversation,
   currentUserId: string,
 ): Conversation {
   const participants = dedupePeople(
-    (record.expand?.participants ?? []).map((user) => toPerson(user)),
+    (record.participants ?? []).map((user) => toPerson(user)),
   ).filter((person) => person.id !== currentUserId);
 
   const title =
@@ -410,11 +641,11 @@ function toConversation(
     participants,
     messages: [],
     unreadCount: 0,
-    createdBy: record.created_by,
-    createdAt: record.created,
-    lastMessagePreview: record.last_message_preview ?? "",
-    lastMessageAt: record.last_message_at ?? "",
-    lastMessageAuthorId: record.last_message_author ?? "",
+    createdBy: record.createdBy,
+    createdAt: record.createdAt,
+    lastMessagePreview: record.lastMessagePreview ?? "",
+    lastMessageAt: record.lastMessageAt ?? "",
+    lastMessageAuthorId: record.lastMessageAuthorId ?? "",
   };
 }
 
@@ -431,23 +662,28 @@ function sortConversations(conversations: Conversation[]): Conversation[] {
 }
 
 export async function restoreSession(): Promise<SessionUser | null> {
-  await authStore.hydrate();
+  await hydrateAuth();
 
-  if (!authStore.isValid) {
-    authStore.clear();
-    return null;
-  }
+  if (!authToken) return null;
 
   try {
-    const auth = await pb.collection("users").authRefresh();
-    return sessionUserFromRecord(auth.record);
+    const data = await apiFetch<{ user: ApiUser }>("/api/auth/session");
+    const user: SessionUser = {
+      id: data.user.id,
+      name: data.user.name,
+      email: data.user.email,
+    };
+    await saveAuth(authToken, user);
+    return user;
   } catch (error) {
-    // Keep the stored session when the API is temporarily unreachable.
-    if (error instanceof ClientResponseError && error.status === 0) {
-      return sessionUserFromRecord(authStore.record);
+    if (error instanceof ApiError) {
+      if (error.status === 0 || error.status >= 500) {
+        return authUser;
+      }
+      await clearAuth();
+      return null;
     }
-    authStore.clear();
-    return null;
+    return authUser;
   }
 }
 
@@ -455,11 +691,20 @@ export async function signIn(
   email: string,
   password: string,
 ): Promise<SessionUser> {
-  const auth = await pb
-    .collection("users")
-    .authWithPassword(email.trim(), password);
-  const user = sessionUserFromRecord(auth.record);
-  if (!user) throw new Error("The server returned an invalid account.");
+  const data = await apiFetch<{ token: string; user: ApiUser }>(
+    "/api/auth/signin",
+    {
+      method: "POST",
+      auth: false,
+      body: JSON.stringify({ email: email.trim(), password }),
+    },
+  );
+  const user: SessionUser = {
+    id: data.user.id,
+    name: data.user.name,
+    email: data.user.email,
+  };
+  await saveAuth(data.token, user);
   return user;
 }
 
@@ -468,110 +713,115 @@ export async function signUp(
   email: string,
   password: string,
 ): Promise<SessionUser> {
-  await pb.collection("users").create({
-    name: name.trim(),
-    email: email.trim(),
-    password,
-    passwordConfirm: password,
-    emailVisibility: false,
-  });
-  return signIn(email, password);
+  const data = await apiFetch<{ token: string; user: ApiUser }>(
+    "/api/auth/signup",
+    {
+      method: "POST",
+      auth: false,
+      body: JSON.stringify({
+        name: name.trim(),
+        email: email.trim(),
+        password,
+      }),
+    },
+  );
+  const user: SessionUser = {
+    id: data.user.id,
+    name: data.user.name,
+    email: data.user.email,
+  };
+  await saveAuth(data.token, user);
+  return user;
 }
 
 export async function signOut(): Promise<void> {
+  await hydrateAuth();
   try {
-    await pb.realtime.unsubscribe();
+    if (authToken) {
+      await apiFetch<void>("/api/auth/signout", { method: "POST" });
+    }
   } catch {
-    // Ignore a failed realtime teardown; the auth store still needs clearing.
+    // Local sign-out must succeed even if the server is unreachable.
   }
-  pb.authStore.clear();
+  realtime.close();
+  await clearAuth();
 }
 
 export async function fetchConversations(
   currentUserId: string,
 ): Promise<Conversation[]> {
-  const records = await pb
-    .collection("conversations")
-    .getFullList<PBConversation>({ expand: "participants" });
+  const all: ApiConversation[] = [];
+  let offset = 0;
+
+  for (let page = 0; page < 10; page += 1) {
+    const data = await apiFetch<{
+      items: ApiConversation[];
+      nextOffset: number | null;
+    }>(`/api/conversations?limit=100&offset=${offset}`);
+    all.push(...data.items);
+    if (data.nextOffset === null) break;
+    offset = data.nextOffset;
+  }
+
   return sortConversations(
-    records.map((record) => toConversation(record, currentUserId)),
+    all.map((record) => toConversation(record, currentUserId)),
   );
 }
 
 export async function fetchPeople(
   currentUserId: string,
 ): Promise<Person[]> {
-  const records = await pb
-    .collection("users")
-    .getFullList<PBUserRecord>({ sort: "name" });
+  const records = await apiFetch<ApiPerson[]>("/api/people");
   return records
     .filter((record) => record.id !== currentUserId)
     .map((record) => toPerson(record));
 }
 
-async function fetchReactionRecords(
-  conversationId: string,
-): Promise<PBReaction[]> {
-  return pb.collection("message_reactions").getFullList<PBReaction>({
-    filter: pb.filter("message.conversation = {:conversation}", {
-      conversation: conversationId,
-    }),
-    sort: "created",
-    expand: "user",
-  });
-}
-
 export async function fetchMessages(
   conversationId: string,
 ): Promise<Message[]> {
-  const [records, reactionRecords] = await Promise.all([
-    pb.collection("messages").getFullList<PBMessage>({
-      filter: pb.filter("conversation = {:conversation}", {
-        conversation: conversationId,
-      }),
-      sort: "created",
-      expand: "author,reply_to.author",
-    }),
-    fetchReactionRecords(conversationId),
-  ]);
+  const pages: ApiMessage[][] = [];
+  let cursor: string | null = null;
 
-  const reactionsByMessage = new Map<string, Reaction[]>();
-  for (const record of reactionRecords) {
-    const reaction = toReaction(record);
-    const list = reactionsByMessage.get(reaction.messageId) ?? [];
-    list.push(reaction);
-    reactionsByMessage.set(reaction.messageId, list);
+  for (let page = 0; page < 10; page += 1) {
+    const params = new URLSearchParams({ limit: "100" });
+    if (cursor) params.set("cursor", cursor);
+    const data = await apiFetch<{
+      items: ApiMessage[];
+      nextCursor: string | null;
+    }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/messages?${params.toString()}`,
+    );
+    pages.unshift(data.items);
+    cursor = data.nextCursor;
+    if (!cursor) break;
   }
 
-  return records.map((record) =>
-    toMessage(record, reactionsByMessage.get(record.id) ?? []),
-  );
+  return pages.flat().map(toMessage);
 }
 
 export async function searchMessageConversations(
   needle: string,
 ): Promise<string[]> {
-  const records = await pb.collection("messages").getFullList<PBMessage>({
-    filter: pb.filter("body ~ {:needle}", { needle }),
-    fields: "conversation",
-  });
-  return [...new Set(records.map((record) => record.conversation))];
+  const params = new URLSearchParams({ q: needle });
+  return apiFetch<string[]>(`/api/search/messages?${params.toString()}`);
 }
 
 export async function createMessage(
   conversationId: string,
-  authorId: string,
+  _authorId: string,
   body: string,
   replyToId?: string,
 ): Promise<Message> {
-  const record = await pb.collection("messages").create<PBMessage>(
+  const record = await apiFetch<ApiMessage>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
     {
-      conversation: conversationId,
-      author: authorId,
-      body,
-      ...(replyToId ? { reply_to: replyToId } : {}),
+      method: "POST",
+      body: JSON.stringify({
+        body,
+        ...(replyToId ? { replyToId } : {}),
+      }),
     },
-    { expand: "author,reply_to.author" },
   );
   return toMessage(record);
 }
@@ -580,52 +830,55 @@ export async function editMessage(
   messageId: string,
   body: string,
 ): Promise<Message> {
-  const record = await pb.collection("messages").update<PBMessage>(
-    messageId,
+  const record = await apiFetch<ApiMessage>(
+    `/api/messages/${encodeURIComponent(messageId)}`,
     {
-      body,
-      edited_at: new Date().toISOString(),
+      method: "PATCH",
+      body: JSON.stringify({ body }),
     },
-    { expand: "author,reply_to.author" },
   );
   return toMessage(record);
 }
 
 export async function deleteMessage(messageId: string): Promise<void> {
-  await pb.collection("messages").delete(messageId);
+  await apiFetch<void>(`/api/messages/${encodeURIComponent(messageId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function addReaction(
   messageId: string,
-  userId: string,
+  _userId: string,
   emoji: string,
 ): Promise<Reaction> {
-  const record = await pb
-    .collection("message_reactions")
-    .create<PBReaction>(
-      { message: messageId, user: userId, emoji },
-      { expand: "user" },
-    );
+  const record = await apiFetch<ApiReaction>(
+    `/api/messages/${encodeURIComponent(messageId)}/reactions`,
+    {
+      method: "POST",
+      body: JSON.stringify({ emoji }),
+    },
+  );
   return toReaction(record);
 }
 
 export async function removeReaction(reactionId: string): Promise<void> {
-  await pb.collection("message_reactions").delete(reactionId);
+  await apiFetch<void>(`/api/reactions/${encodeURIComponent(reactionId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function createDirectConversation(
   person: Person,
   currentUser: Person,
 ): Promise<Conversation> {
-  const record = await pb.collection("conversations").create<PBConversation>(
-    {
+  const record = await apiFetch<ApiConversation>("/api/conversations", {
+    method: "POST",
+    body: JSON.stringify({
       title: person.name,
       kind: "direct",
-      created_by: currentUser.id,
-      participants: [currentUser.id, person.id],
-    },
-    { expand: "participants" },
-  );
+      participantIds: [person.id],
+    }),
+  });
 
   const conversation = toConversation(record, currentUser.id);
   return {
@@ -639,324 +892,236 @@ export async function createDirectConversation(
 }
 
 export async function removeConversation(conversationId: string): Promise<void> {
-  await pb.collection("conversations").delete(conversationId);
-}
-
-async function findConversationRead(
-  conversationId: string,
-  userId: string,
-): Promise<PBConversationRead | null> {
-  try {
-    return await pb
-      .collection("conversation_reads")
-      .getFirstListItem<PBConversationRead>(
-        pb.filter("conversation = {:conversation} && user = {:user}", {
-          conversation: conversationId,
-          user: userId,
-        }),
-        { expand: "user" },
-      );
-  } catch (error) {
-    if (error instanceof ClientResponseError && error.status === 404) {
-      return null;
-    }
-    throw error;
-  }
+  await apiFetch<void>(
+    `/api/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export async function fetchConversationReads(
   conversationId: string,
 ): Promise<ConversationRead[]> {
-  const records = await pb
-    .collection("conversation_reads")
-    .getFullList<PBConversationRead>({
-      filter: pb.filter("conversation = {:conversation}", {
-        conversation: conversationId,
-      }),
-      expand: "user",
-    });
+  const records = await apiFetch<ApiRead[]>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/reads`,
+  );
   return records.map(toConversationRead);
 }
 
 /**
- * Upsert the caller's read position. `readAtIso` should be the server timestamp
- * of the newest message they have seen so receipts compare consistently.
+ * Upsert the caller's read position. The server derives the timestamp from the
+ * referenced message (or uses its own clock for a null target), so a client
+ * cannot forge a future read time.
  */
 export async function markConversationRead(
   conversationId: string,
-  userId: string,
+  _userId: string,
   lastReadMessageId: string | null,
-  readAtIso: string,
+  _readAtIso: string,
 ): Promise<ConversationRead | null> {
-  const data = {
-    last_read_message: lastReadMessageId ?? "",
-    last_read_at: readAtIso,
-  };
-  const existing = await findConversationRead(conversationId, userId);
-
-  if (existing) {
-    const current = parsePocketBaseDate(existing.last_read_at)?.getTime() ?? 0;
-    const target = parsePocketBaseDate(readAtIso)?.getTime() ?? 0;
-    if (current >= target) return toConversationRead(existing);
-
-    const updated = await pb
-      .collection("conversation_reads")
-      .update<PBConversationRead>(existing.id, data, { expand: "user" });
-    return toConversationRead(updated);
-  }
-
-  try {
-    const created = await pb
-      .collection("conversation_reads")
-      .create<PBConversationRead>(
-        { conversation: conversationId, user: userId, ...data },
-        { expand: "user" },
-      );
-    return toConversationRead(created);
-  } catch (error) {
-    // A concurrent request may have created the unique (conversation, user)
-    // row between our lookup and insert.
-    if (error instanceof ClientResponseError && error.status === 400) {
-      const retry = await findConversationRead(conversationId, userId);
-      if (retry) {
-        const current = parsePocketBaseDate(retry.last_read_at)?.getTime() ?? 0;
-        const target = parsePocketBaseDate(readAtIso)?.getTime() ?? 0;
-        if (current >= target) return toConversationRead(retry);
-        const updated = await pb
-          .collection("conversation_reads")
-          .update<PBConversationRead>(retry.id, data, { expand: "user" });
-        return toConversationRead(updated);
-      }
-    }
-    throw error;
-  }
-}
-
-const typingRecordIds = new Map<string, string>();
-
-function typingKey(conversationId: string, userId: string): string {
-  return `${conversationId}:${userId}`;
+  const record = await apiFetch<ApiRead>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/read`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ lastReadMessageId }),
+    },
+  );
+  return toConversationRead(record);
 }
 
 export async function fetchTypingIndicators(
-  conversationId: string,
+  _conversationId: string,
 ): Promise<TypingIndicator[]> {
-  const records = await pb
-    .collection("typing_indicators")
-    .getFullList<PBTypingIndicator>({
-      filter: pb.filter("conversation = {:conversation}", {
-        conversation: conversationId,
-      }),
-    });
-  return records.map((record) => ({
-    conversationId: record.conversation,
-    userId: record.user,
-    lastSeenIso: record.last_seen,
-  }));
+  // Typing is ephemeral and delivered over the realtime stream. There is no
+  // durable snapshot to fetch when opening a conversation.
+  return [];
 }
 
 export async function heartbeatTyping(
   conversationId: string,
-  userId: string,
+  _userId: string,
 ): Promise<void> {
-  const lastSeen = new Date().toISOString();
-  const key = typingKey(conversationId, userId);
-  const cachedId = typingRecordIds.get(key);
-
-  if (cachedId) {
-    try {
-      await pb
-        .collection("typing_indicators")
-        .update(cachedId, { last_seen: lastSeen });
-      return;
-    } catch (error) {
-      if (!(error instanceof ClientResponseError) || error.status !== 404) {
-        throw error;
-      }
-      typingRecordIds.delete(key);
-    }
-  }
-
-  let existing: PBTypingIndicator | null = null;
-  try {
-    existing = await pb
-      .collection("typing_indicators")
-      .getFirstListItem<PBTypingIndicator>(
-        pb.filter("conversation = {:conversation} && user = {:user}", {
-          conversation: conversationId,
-          user: userId,
-        }),
-        { fields: "id" },
-      );
-  } catch (error) {
-    if (!(error instanceof ClientResponseError) || error.status !== 404) {
-      throw error;
-    }
-  }
-
-  if (existing) {
-    typingRecordIds.set(key, existing.id);
-    await pb
-      .collection("typing_indicators")
-      .update(existing.id, { last_seen: lastSeen });
-    return;
-  }
-
-  const created = await pb
-    .collection("typing_indicators")
-    .create<PBTypingIndicator>({
-      conversation: conversationId,
-      user: userId,
-      last_seen: lastSeen,
-    });
-  typingRecordIds.set(key, created.id);
+  await apiFetch<void>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/typing`,
+    { method: "POST" },
+  );
 }
 
 export async function clearTypingIndicator(
   conversationId: string,
-  userId: string,
+  _userId: string,
 ): Promise<void> {
-  const key = typingKey(conversationId, userId);
-  const cachedId = typingRecordIds.get(key);
-  typingRecordIds.delete(key);
-
-  if (cachedId) {
-    try {
-      await pb.collection("typing_indicators").delete(cachedId);
-      return;
-    } catch (error) {
-      if (!(error instanceof ClientResponseError) || error.status !== 404) {
-        throw error;
-      }
-    }
-  }
-
-  try {
-    const existing = await pb
-      .collection("typing_indicators")
-      .getFirstListItem<PBTypingIndicator>(
-        pb.filter("conversation = {:conversation} && user = {:user}", {
-          conversation: conversationId,
-          user: userId,
-        }),
-        { fields: "id" },
-      );
-    await pb.collection("typing_indicators").delete(existing.id);
-  } catch (error) {
-    if (!(error instanceof ClientResponseError) || error.status !== 404) {
-      throw error;
-    }
-  }
+  await apiFetch<void>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/typing`,
+    { method: "DELETE" },
+  );
 }
+
+export type MessageSubscriptionEvent = {
+  action: string;
+  record: { id?: string; conversation?: string };
+  message?: Message;
+};
+
+export type ConversationSubscriptionEvent = {
+  action: string;
+  record: { id?: string };
+};
+
+export type ReactionSubscriptionEvent = {
+  action: string;
+  record: { id?: string; message?: string; user?: string };
+  reaction?: Reaction;
+};
+
+export type ConversationReadSubscriptionEvent = {
+  action: string;
+  record: { conversation?: string; user?: string };
+  read?: ConversationRead;
+};
+
+export type TypingSubscriptionEvent = {
+  action: string;
+  record: { conversation?: string; user?: string };
+  typing?: TypingIndicator;
+};
 
 export async function subscribeToMessages(
   onEvent: (event: MessageSubscriptionEvent) => void,
 ): Promise<() => Promise<void>> {
-  return pb.collection("messages").subscribe<PBMessage>(
-    "*",
-    (event) => {
+  const unsubscribe = realtime.on("message", (event) => {
+    if (event.type === "message.created" || event.type === "message.updated") {
+      const message = toMessage(event.message);
       onEvent({
-        action: event.action,
-        record: event.record,
-        message: event.action === "delete" ? undefined : toMessage(event.record),
+        action: event.type === "message.created" ? "create" : "update",
+        record: { id: message.id, conversation: message.conversationId },
+        message,
       });
-    },
-    { expand: "author,reply_to.author" },
-  );
+      return;
+    }
+    if (event.type === "message.deleted") {
+      onEvent({
+        action: "delete",
+        record: {
+          id: event.messageId,
+          conversation: event.conversationId,
+        },
+      });
+    }
+  });
+  return async () => unsubscribe();
 }
 
 export async function subscribeToConversations(
   onEvent: (event: ConversationSubscriptionEvent) => void,
 ): Promise<() => Promise<void>> {
-  return pb.collection("conversations").subscribe<PBConversation>(
-    "*",
-    (event) => {
-      onEvent({ action: event.action, record: event.record });
-    },
-    { expand: "participants" },
-  );
+  const unsubscribe = realtime.on("conversation", (event) => {
+    if (event.type === "conversation.created" || event.type === "conversation.updated") {
+      onEvent({
+        action: event.type === "conversation.created" ? "create" : "update",
+        record: { id: event.conversation.id },
+      });
+      return;
+    }
+    if (event.type === "conversation.deleted") {
+      onEvent({
+        action: "delete",
+        record: { id: event.conversationId },
+      });
+    }
+  });
+  return async () => unsubscribe();
 }
 
 export async function subscribeToReactions(
   onEvent: (event: ReactionSubscriptionEvent) => void,
 ): Promise<() => Promise<void>> {
-  return pb.collection("message_reactions").subscribe<PBReaction>(
-    "*",
-    (event) => {
+  const unsubscribe = realtime.on("reaction", (event) => {
+    if (event.type === "reaction.added") {
       onEvent({
-        action: event.action,
-        record: event.record,
-        reaction:
-          event.action === "delete" ? undefined : toReaction(event.record),
+        action: "create",
+        record: {
+          id: event.reaction.id,
+          message: event.reaction.messageId,
+          user: event.reaction.user.id,
+        },
+        reaction: toReaction(event.reaction),
       });
-    },
-    { expand: "user" },
-  );
+      return;
+    }
+    if (event.type === "reaction.removed") {
+      onEvent({
+        action: "delete",
+        record: { id: event.reactionId, message: event.messageId },
+      });
+    }
+  });
+  return async () => unsubscribe();
 }
 
 export async function subscribeToConversationReads(
   onEvent: (event: ConversationReadSubscriptionEvent) => void,
 ): Promise<() => Promise<void>> {
-  return pb
-    .collection("conversation_reads")
-    .subscribe<PBConversationRead>(
-      "*",
-      (event) => {
-        onEvent({
-          action: event.action,
-          record: event.record,
-          read:
-            event.action === "delete"
-              ? undefined
-              : toConversationRead(event.record),
-        });
+  const unsubscribe = realtime.on("read", (event) => {
+    if (event.type !== "read.updated") return;
+    onEvent({
+      action: "update",
+      record: {
+        conversation: event.read.conversationId,
+        user: event.read.user.id,
       },
-      { expand: "user" },
-    );
+      read: toConversationRead(event.read),
+    });
+  });
+  return async () => unsubscribe();
 }
 
 export async function subscribeToTypingIndicators(
   onEvent: (event: TypingSubscriptionEvent) => void,
 ): Promise<() => Promise<void>> {
-  return pb
-    .collection("typing_indicators")
-    .subscribe<PBTypingIndicator>("*", (event) => {
+  const unsubscribe = realtime.on("typing", (event) => {
+    if (event.type === "typing.updated") {
+      const lastSeenIso = new Date().toISOString();
       onEvent({
-        action: event.action,
-        record: event.record,
-        typing:
-          event.action === "delete"
-            ? undefined
-            : {
-                conversationId: event.record.conversation,
-                userId: event.record.user,
-                lastSeenIso: event.record.last_seen,
-              },
+        action: "update",
+        record: {
+          conversation: event.conversationId,
+          user: event.userId,
+        },
+        typing: {
+          conversationId: event.conversationId,
+          userId: event.userId,
+          lastSeenIso,
+        },
       });
-    });
+      return;
+    }
+    if (event.type === "typing.stopped") {
+      onEvent({
+        action: "delete",
+        record: {
+          conversation: event.conversationId,
+          user: event.userId,
+        },
+      });
+    }
+  });
+  return async () => unsubscribe();
+}
+
+export async function subscribeToRealtimeStatus(
+  onStatus: (status: RealtimeStatus) => void,
+): Promise<() => Promise<void>> {
+  const unsubscribe = realtime.onStatus(onStatus);
+  return async () => unsubscribe();
 }
 
 export function describeError(error: unknown): string {
-  if (error instanceof ClientResponseError) {
+  if (error instanceof ApiError) {
     if (error.status === 0) {
-      return `Can't reach the Open Services server at ${POCKETBASE_URL}. Check that the backend is running and, on a phone, that the device and computer are on the same Wi-Fi network.`;
+      return `Can't reach the Open Services server at ${API_URL}. Check that the backend is running and, on a phone, that the device and computer are on the same Wi-Fi network.`;
     }
-
-    const data = error.response?.data;
-    if (data && typeof data === "object") {
-      for (const value of Object.values(data)) {
-        if (
-          value &&
-          typeof value === "object" &&
-          typeof (value as { message?: unknown }).message === "string"
-        ) {
-          return (value as { message: string }).message;
-        }
-      }
-    }
-
     if (error.status === 401 || error.status === 403) {
-      return "Your session expired. Please sign in again.";
+      return error.message || "Your session expired. Please sign in again.";
     }
     if (error.status === 404) {
       return "That item is no longer available.";

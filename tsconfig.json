@@ -8,6 +8,7 @@
     "apktool_out",
     "decompiled",
     "extracted",
-    "node_modules"
+    "node_modules",
+    "worker"
   ]
 }

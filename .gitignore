@@ -24,6 +24,8 @@ analysis/
 
 # Local env
 .env
+.dev.vars
+.wrangler/
 
 # Backups and archives
 backup_artifacts_*.tar.gz

@@ -22,6 +22,7 @@ import {
   subscribeToConversations,
   subscribeToMessages,
   subscribeToReactions,
+  subscribeToRealtimeStatus,
   subscribeToTypingIndicators,
 } from "../api/pocketbase";
 import {
@@ -132,6 +133,8 @@ export function useWorkspace({
     let unsubscribeReactions: (() => Promise<void>) | null = null;
     let unsubscribeReads: (() => Promise<void>) | null = null;
     let unsubscribeTyping: (() => Promise<void>) | null = null;
+    let unsubscribeStatus: (() => Promise<void>) | null = null;
+    let hasConnected = false;
 
     const refreshConversations = () => {
       if (refreshTimer) clearTimeout(refreshTimer);
@@ -328,6 +331,23 @@ export function useWorkspace({
       })
       .catch(() => undefined);
 
+    void subscribeToRealtimeStatus((status) => {
+      if (disposed || status !== "connected") return;
+      // The socket can miss events while it is reconnecting. Refetch once the
+      // connection is restored instead of trying to replay an event log.
+      if (hasConnected) {
+        refreshConversations();
+        const activeId = selectedIdRef.current;
+        if (activeId) void loadConversation(activeId);
+      }
+      hasConnected = true;
+    })
+      .then((unsubscribe) => {
+        if (disposed) void unsubscribe();
+        else unsubscribeStatus = unsubscribe;
+      })
+      .catch(() => undefined);
+
     void subscribeToTypingIndicators((event) => {
       if (disposed) return;
       const conversationId = event.record?.conversation;
@@ -367,6 +387,9 @@ export function useWorkspace({
       }
       if (unsubscribeTyping) {
         void unsubscribeTyping().catch(() => undefined);
+      }
+      if (unsubscribeStatus) {
+        void unsubscribeStatus().catch(() => undefined);
       }
     };
   }, [userId]);

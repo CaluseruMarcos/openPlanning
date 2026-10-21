@@ -75,7 +75,7 @@ export function SignInScreen({
         </Text>
         <Text style={styles.signInBody}>
           {mode === "signin"
-            ? "Sign in to your Open Services workspace. Conversations sync with the local PocketBase server and arrive in realtime."
+            ? "Sign in to your Open Services workspace. Conversations sync with the Open Services backend and arrive in realtime."
             : "Create an email account for this Open Services deployment. You can start a conversation with any other member right away."}
         </Text>
 

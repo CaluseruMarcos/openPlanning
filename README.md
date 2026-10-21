@@ -20,27 +20,36 @@ This repository intentionally avoids shipping large generated binaries in Git hi
 - JavaScript / TypeScript
 - React + React Native (Expo)
 - Expo SDK (project scripts in package.json)
-- PocketBase 0.40 (MIT) — SQLite, email/password auth, REST API, realtime SSE
+- Cloudflare Workers + D1 + Durable Objects — primary backend, realtime WebSocket
+- PocketBase 0.40 (MIT) — legacy fallback under `backend/`
 - Build/analysis tools used locally (jadx, apktool) — not tracked in git history
 
 ---
 
 ## Backend & authentication
-The rebuild talks to a local, self-hostable **PocketBase** instance for accounts,
-conversations, and messages. Email/password auth is implemented now; native tokens
-are stored in SecureStore and the web build uses localStorage-backed storage.
-Messages and conversation summaries sync over realtime SSE, and message history is
-searchable through the API.
+The rebuild targets the **Cloudflare Worker** in [`worker/`](worker/README.md) for
+accounts, conversations, messages, reactions, read receipts, and realtime events.
+D1 stores durable data; one UserHub Durable Object per signed-in user carries
+WebSocket events. Native tokens are stored in SecureStore and the web build uses
+localStorage-backed storage.
+
+Email/password auth and session restore are implemented. The Worker still needs a
+real Cloudflare D1 database, secrets, and a deployment before it can be used
+outside local development. The original **PocketBase** backend remains under
+[`backend/`](backend/README.md) as a reference and rollback path; the client no
+longer imports the PocketBase SDK or SSE polyfill.
 
 Planning Center OAuth linking is deferred until client credentials and a registered
-callback are available. The access rules, schema, seed data, and deployment notes
-live in [`backend/README.md`](backend/README.md).
+callback are available. The migration design, schema, routes, and protocol live in
+[`docs/cloudflare-migration.md`](docs/cloudflare-migration.md).
 
 ---
 
 ## Repository layout (high level)
-- `src/` — application source (React & TypeScript), PocketBase client, and local preferences
-- `backend/` — PocketBase server setup, migrations, hooks, and demo seed
+- `src/` — application source (React & TypeScript), backend client adapter, and local preferences
+- `worker/` — Cloudflare Worker API, D1 migrations, UserHub Durable Object, and seed
+- `backend/` — legacy PocketBase setup, migrations, hooks, and demo seed
+- `docs/` — migration design and architecture notes
 - `.expo/`, `android/`, `ios/` — platform metadata (when present)
 - `tools/` — helper tools (large jars were removed from history; download as needed)
 - `apk/`, `apktool_out/`, `extracted/`, `decompiled/`, `analysis/` — generated/reverse-engineering artifacts (archived locally, not tracked)
@@ -61,7 +70,57 @@ npm install
 # yarn install
 ```
 
-Start the local backend (first run downloads the PocketBase binary):
+Start the local Cloudflare Worker backend:
+
+```bash
+cp worker/.dev.vars.example worker/.dev.vars
+# edit the two local secrets, then:
+npm run worker:migrate:local
+npm run worker:dev
+```
+
+The Worker listens on `http://127.0.0.1:8787`. If that port is taken, pick another
+with `npx wrangler dev -c worker/wrangler.toml --port 8788` and set
+`EXPO_PUBLIC_API_URL` accordingly.
+
+In a second terminal, seed the demo workspace:
+
+```bash
+npm run worker:seed
+```
+
+Demo accounts (password `openservices`): `marcos@example.com`,
+`sarah@example.com`, `michael@example.com`.
+
+Then start the app. During development the app auto-detects the Expo dev
+server's LAN host on port `8787`, so no URL is normally needed:
+
+```bash
+npm run web     # or: npm start, then press i / a
+```
+
+To override the API URL, set it explicitly:
+
+```bash
+EXPO_PUBLIC_API_URL=http://192.168.1.50:8787 npm run web
+```
+
+`EXPO_PUBLIC_POCKETBASE_URL` is accepted as a legacy alias, but new builds should
+use `EXPO_PUBLIC_API_URL`. The sign-in screen shows the URL the app resolved. For
+the Android emulator the fallback is `http://10.0.2.2:8787`; for a physical device
+use your computer's LAN address (and make sure both are on the same network).
+Release builds must set `EXPO_PUBLIC_API_URL` at build time.
+
+Type-check both the app and the Worker:
+
+```bash
+npm run typecheck
+npm run typecheck:worker
+```
+
+### Legacy PocketBase fallback
+
+The old PocketBase backend still runs on port 8090:
 
 ```bash
 cd backend
@@ -69,44 +128,9 @@ cd backend
 ./start.sh
 ```
 
-`start.sh` listens on `0.0.0.0:8090` by default so a phone on the same Wi-Fi can
-reach it. Set `PB_HOST=127.0.0.1` to restrict it to this machine.
-
-In a second terminal, seed the demo workspace:
-
-```bash
-cd backend
-node seed.mjs
-```
-
-Demo accounts (password `openservices`): `marcos@example.com`,
-`sarah@example.com`, `michael@example.com`. The local admin dashboard is at
-`http://127.0.0.1:8090/_/` (`admin@openservices.local` / `devpassword` — dev only).
-See [`backend/README.md`](backend/README.md) for details and production notes.
-
-Then start the app. During development the app auto-detects the Expo dev
-server's LAN host, so no URL is normally needed:
-
-```bash
-npm run web     # or: npm start, then press i / a
-```
-
-To override the API URL, set it explicitly (or copy `.env.example` to `.env`):
-
-```bash
-EXPO_PUBLIC_POCKETBASE_URL=http://192.168.1.50:8090 npm run web
-```
-
-The sign-in screen shows the URL the app resolved. For the Android emulator the
-fallback is `http://10.0.2.2:8090`; for a physical device use your computer's LAN
-address (and make sure both are on the same network). Release builds must set
-`EXPO_PUBLIC_POCKETBASE_URL` at build time.
-
-Type-check the source:
-
-```bash
-npm run typecheck
-```
+It is useful as a reference or rollback path, but the current client adapter talks
+to the Worker API. See [`backend/README.md`](backend/README.md) for the old setup,
+schema, and production notes.
 
 Start the Expo dev server:
 

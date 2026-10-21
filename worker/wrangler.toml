@@ -1,0 +1,31 @@
+name = "open-services-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[vars]
+ENVIRONMENT = "development"
+SESSION_TTL_DAYS = "30"
+PBKDF2_ITERATIONS = "100000"
+APP_ORIGIN = "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "open-services"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "USER_HUB"
+class_name = "UserHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UserHub"]
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "open-services-files"
+
+[triggers]
+crons = ["17 * * * *"]
