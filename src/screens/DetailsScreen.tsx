@@ -25,60 +25,59 @@ export function DetailsScreen({
   onDelete: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const people = conversation.participants.some((person) => person.id === me.id)
+    ? conversation.participants
+    : [...conversation.participants, me];
+
   return (
     <View style={[styles.flex, { paddingBottom: insets.bottom }]}>
       <Header title="Details" onBack={onBack} />
       <ScrollView contentContainerStyle={styles.detailsContent}>
         <View style={styles.detailsHero}>
-          <Avatar person={conversation.participants[0] ?? me} size={64} />
-          <Text style={styles.detailsTitle}>{conversation.title}</Text>
-          <Text style={styles.detailsSubtitle}>
-            {conversation.kind === "direct"
-              ? "Direct message"
-              : conversation.kind === "team"
-                ? "Team conversation"
-                : "Group conversation"}
-          </Text>
-        </View>
-
-        <Text style={styles.sectionLabel}>PARTICIPANTS</Text>
-        <View style={styles.card}>
-          {conversation.participants.map((person, index) => (
-            <View
-              key={person.id}
-              style={[styles.participantRow, index > 0 && styles.rowBorder]}
-            >
-              <Avatar person={person} size={38} />
-              <Text style={styles.participantName}>{person.name}</Text>
-            </View>
-          ))}
-          <View
-            style={[
-              styles.participantRow,
-              conversation.participants.length > 0 && styles.rowBorder,
-            ]}
-          >
-            <Avatar person={me} size={38} />
-            <Text style={styles.participantName}>{me.name} (you)</Text>
+          <Avatar person={conversation.participants[0] ?? me} size={56} />
+          <View style={styles.flex}>
+            <Text style={styles.detailsTitle}>{conversation.title}</Text>
+            <Text style={styles.detailsSubtitle}>
+              {conversation.kind === "direct"
+                ? "Direct message"
+                : conversation.kind === "team"
+                  ? "Team conversation"
+                  : "Group conversation"}
+            </Text>
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>PREFERENCES</Text>
-        <View style={styles.card}>
-          <View style={styles.settingRow}>
-            <View style={styles.flex}>
-              <Text style={styles.settingTitle}>Mute notifications</Text>
-              <Text style={styles.settingHint}>
-                Pause alerts for this conversation only
-              </Text>
-            </View>
-            <Switch
-              value={muted}
-              onValueChange={onToggleMute}
-              trackColor={{ false: colors.lineStrong, true: colors.infoTint }}
-              thumbColor={muted ? colors.chrome : colors.paperBright}
-            />
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>People</Text>
+          <Text style={styles.sectionCount}>{people.length}</Text>
+        </View>
+        {people.map((person) => (
+          <View key={person.id} style={styles.participantRow}>
+            <Avatar person={person} size={38} />
+            <Text style={styles.participantName}>{person.name}</Text>
+            {person.id === me.id ? (
+              <Text style={styles.participantTag}>You</Text>
+            ) : null}
           </View>
+        ))}
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Notifications</Text>
+        </View>
+        <View style={styles.settingRow}>
+          <View style={styles.flex}>
+            <Text style={styles.settingTitle}>Mute notifications</Text>
+            <Text style={styles.settingHint}>
+              Pause alerts for this conversation only
+            </Text>
+          </View>
+          <Switch
+            value={muted}
+            onValueChange={onToggleMute}
+            trackColor={{ false: colors.lineStrong, true: colors.accent }}
+            thumbColor={colors.paperBright}
+            ios_backgroundColor={colors.lineStrong}
+          />
         </View>
 
         {canDelete ? (

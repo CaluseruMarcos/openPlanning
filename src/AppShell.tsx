@@ -14,7 +14,6 @@ import {
   describeError,
   onUnauthorized,
   parsePocketBaseDate,
-  POCKETBASE_URL,
   restoreSession,
   signIn,
   signOut,
@@ -509,7 +508,6 @@ export function AppShell() {
         <SignInScreen
           busy={authBusy}
           error={authError}
-          serverUrl={POCKETBASE_URL}
           onSubmit={handleAuth}
           onClearError={() => setAuthError(null)}
         />
@@ -603,7 +601,6 @@ export function AppShell() {
         ) : tab === "profile" ? (
           <ProfileScreen
             session={session}
-            conversations={workspace.conversations}
             notificationPref={notificationPref}
             onNotificationPrefChange={changeNotificationPref}
             onAbout={() => setSheet("about")}
@@ -688,12 +685,12 @@ export function AppShell() {
           >
             <SheetRow
               label="Photo"
-              hint="Sends a text placeholder"
+              hint="Sends a placeholder message"
               onPress={() => addAttachmentMessage("Photo")}
             />
             <SheetRow
               label="File"
-              hint="Sends a text placeholder"
+              hint="Sends a placeholder message"
               onPress={() => addAttachmentMessage("File")}
             />
             <SheetRow label="Cancel" onPress={() => setSheet(null)} />
@@ -833,16 +830,12 @@ export function AppShell() {
 
       <Sheet
         visible={sheet === "about"}
-        title="About this rebuild"
+        title="About Open Services"
         onClose={() => setSheet(null)}
       >
         <Text style={styles.sheetBody}>
-          Open Services is an Expo rebuild of the Planning Center Services chat
-          surface. Conversations and messages are stored in a self-hosted
-          PocketBase backend and sync in realtime between signed-in accounts.
-        </Text>
-        <Text style={styles.sheetBodyMuted}>
-          Version 0.1.0 · Expo 57 · React Native 0.86 · PocketBase 0.40
+          A small team chat for the people who run the service. Messages,
+          activity, and read receipts stay together, on web and mobile.
         </Text>
         <SheetRow label="Close" onPress={() => setSheet(null)} />
       </Sheet>

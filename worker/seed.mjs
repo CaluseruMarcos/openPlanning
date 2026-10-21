@@ -188,7 +188,7 @@ async function main() {
       token: marcos.token,
       method: "POST",
       body: {
-        body: "Welcome to the Cloudflare Worker backend. This is a seeded demo message.",
+        body: "Morning Sarah. I put the updated run sheet in the shared folder. Let me know if the call time works for your team.",
       },
     });
     console.log("demo message created");
@@ -200,13 +200,13 @@ async function main() {
   );
   const current = withReactions.items.find((item) => item.id === message.id);
   const hasSarahReaction = current?.reactions?.some(
-    (reaction) => reaction.user.id === sarah.user.id && reaction.emoji === "👋",
+    (reaction) => reaction.user.id === sarah.user.id && reaction.emoji === "👍",
   );
   if (!hasSarahReaction) {
     await request(`/messages/${message.id}/reactions`, {
       token: sarah.token,
       method: "POST",
-      body: { emoji: "👋" },
+      body: { emoji: "👍" },
     });
     console.log("demo reaction created");
   }

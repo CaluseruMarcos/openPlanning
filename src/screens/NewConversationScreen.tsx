@@ -1,12 +1,10 @@
 import { FlatList, Pressable, Text, View } from "react-native";
-import Feather from "@expo/vector-icons/Feather";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "../components/Avatar";
 import { EmptyState, LoadingInline } from "../components/Feedback";
 import { Header } from "../components/Header";
 import { styles } from "../styles";
-import { colors } from "../theme";
 import type { Person } from "../types";
 
 export function NewConversationScreen({
@@ -38,19 +36,13 @@ export function NewConversationScreen({
           keyExtractor={(person) => person.id}
           contentContainerStyle={styles.newMessageContent}
           ListHeaderComponent={
-            <View>
-              <Text style={styles.sectionLabel}>TO</Text>
-              <Text style={styles.newMessageHint}>
-                Choose a person to message.
-              </Text>
-              {loading ? <LoadingInline label="Loading people…" /> : null}
-            </View>
+            loading ? <LoadingInline label="Loading people…" /> : null
           }
           ListEmptyComponent={
             loading ? null : (
               <EmptyState
                 title="No teammates yet"
-                body="Create another account or run the seed script to start a conversation."
+                body="Invite a teammate to start a conversation."
               />
             )
           }
@@ -65,11 +57,7 @@ export function NewConversationScreen({
               ]}
             >
               <Avatar person={item} size={42} />
-              <View style={styles.flex}>
-                <Text style={styles.personName}>{item.name}</Text>
-                <Text style={styles.personHint}>Direct message</Text>
-              </View>
-              <Feather name="chevron-right" size={18} color={colors.faint} />
+              <Text style={styles.personName}>{item.name}</Text>
             </Pressable>
           )}
         />

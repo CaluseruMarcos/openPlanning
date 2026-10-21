@@ -1,18 +1,12 @@
 import Feather from "@expo/vector-icons/Feather";
-import { useMemo } from "react";
-import {
-  FlatList,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { useMemo, useState } from "react";
+import { FlatList, Pressable, Text, TextInput, View } from "react-native";
 
 import { formatTimestamp } from "../api/pocketbase";
 import { Avatar } from "../components/Avatar";
 import { EmptyState, LoadingInline } from "../components/Feedback";
-import { ScreenHeader } from "../components/ScreenHeader";
 import { Logo } from "../components/Logo";
+import { ScreenHeader } from "../components/ScreenHeader";
 import { styles } from "../styles";
 import { colors } from "../theme";
 import type {
@@ -74,6 +68,8 @@ export function ConversationListScreen({
     (total, conversation) => total + conversation.unreadCount,
     0,
   );
+  const trimmedQuery = query.trim();
+  const [searchFocused, setSearchFocused] = useState(false);
 
   return (
     <View style={styles.flex}>
@@ -83,38 +79,50 @@ export function ConversationListScreen({
             <Logo size={28} tone="paper" />
             <Text style={styles.wordmark}>Open Services</Text>
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open profile"
-            onPress={onProfile}
-            style={styles.profileButton}
-          >
-            <Avatar person={me} size={38} />
-            <View style={styles.onlineDot} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="New conversation"
+              onPress={onCreate}
+              style={({ pressed }) => [
+                styles.newButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Feather name="plus" size={14} color={colors.chrome} />
+              <Text style={styles.newButtonText}>New</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open profile"
+              onPress={onProfile}
+            >
+              <Avatar person={me} size={36} />
+            </Pressable>
+          </View>
         </View>
-        <Text style={styles.screenTitle}>Conversations</Text>
-        <Text style={styles.screenMeta}>
-          {unread > 0
-            ? `${unread} unread across ${conversations.length} ${
-                conversations.length === 1 ? "conversation" : "conversations"
-              }`
-            : "You're up to date."}
-        </Text>
-        <View style={styles.searchBox}>
+        <View style={styles.titleRow}>
+          <Text style={styles.screenTitle}>Conversations</Text>
+          <Text style={styles.screenMeta}>
+            {unread > 0 ? `${unread} unread` : "No unread messages"}
+          </Text>
+        </View>
+        <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>
           <Feather
             name="search"
             size={16}
             color={colors.chromeSoft}
-            style={{ marginRight: 8 }}
+            style={styles.searchIcon}
           />
           <TextInput
             value={query}
             onChangeText={onQueryChange}
-            placeholder="Search conversations"
+            placeholder="Search"
             placeholderTextColor={colors.chromeSoft}
             style={styles.searchInput}
             returnKeyType="search"
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
             accessibilityLabel="Search conversations"
           />
           {query.length > 0 ? (
@@ -130,36 +138,49 @@ export function ConversationListScreen({
         </View>
       </ScreenHeader>
       <View style={styles.filterBar}>
-        {(
-          [
-            ["all", "All"],
-            ["unread", "Unread"],
-            ["teams", "Teams"],
-          ] as [ConversationFilter, string][]
-        ).map(([value, label]) => {
-          const active = filter === value;
-          return (
-            <Pressable
-              key={value}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              onPress={() => onFilterChange(value)}
-              style={styles.filterTab}
-            >
-              <View style={styles.filterTabRow}>
-                <Text
-                  style={active ? styles.filterTextActive : styles.filterText}
-                >
-                  {label}
-                </Text>
-                {value === "unread" && unread > 0 ? (
-                  <Text style={styles.filterCount}>{unread}</Text>
-                ) : null}
-              </View>
-              {active ? <View style={styles.filterMarker} /> : null}
-            </Pressable>
-          );
-        })}
+        <View style={styles.filterTabs}>
+          {(
+            [
+              ["all", "All"],
+              ["unread", "Unread"],
+              ["teams", "Teams"],
+            ] as [ConversationFilter, string][]
+          ).map(([value, label]) => {
+            const active = filter === value;
+            return (
+              <Pressable
+                key={value}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                onPress={() => onFilterChange(value)}
+                style={styles.filterTab}
+              >
+                <View style={styles.filterTabRow}>
+                  <Text
+                    style={active ? styles.filterTextActive : styles.filterText}
+                  >
+                    {label}
+                  </Text>
+                  {value === "unread" && unread > 0 ? (
+                    <Text style={styles.filterCount}>{unread}</Text>
+                  ) : null}
+                </View>
+                {active ? <View style={styles.filterMarker} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        {searchingMessages && trimmedQuery && visible.length > 0 ? (
+          <Text style={styles.filterStatus}>Searching…</Text>
+        ) : unread > 0 && !trimmedQuery ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={onMarkAllRead}
+            hitSlop={8}
+          >
+            <Text style={styles.filterAction}>Mark all read</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <FlatList
@@ -168,46 +189,26 @@ export function ConversationListScreen({
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionLabel}>
-              {query.trim()
-                ? searchingMessages
-                  ? "SEARCHING…"
-                  : "RESULTS"
-                : "RECENT"}
-            </Text>
-            {unread > 0 ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={onMarkAllRead}
-                hitSlop={8}
-              >
-                <Text style={styles.sectionAction}>Mark all read</Text>
-              </Pressable>
-            ) : (
-              <Text style={styles.sectionMuted}>All read</Text>
-            )}
-          </View>
-        }
         ListEmptyComponent={
           loading && conversations.length === 0 ? (
             <LoadingInline label="Loading conversations…" />
+          ) : searchingMessages && trimmedQuery ? (
+            <LoadingInline label="Searching messages…" />
           ) : (
             <EmptyState
               title={
-                query.trim()
+                trimmedQuery
                   ? "No matches"
                   : filter === "unread"
-                    ? "You're all caught up"
+                    ? "No unread conversations"
                     : "No conversations yet"
               }
               body={
-                query.trim()
-                  ? `Nothing matches “${query.trim()}”. Try a person, team, or message.`
+                trimmedQuery
+                  ? `Nothing matches “${trimmedQuery}”. Try a name or a message.`
                   : filter === "unread"
-                    ? "Unread conversations will appear here."
-                    : "Start a conversation with the compose button."
+                    ? "New messages will show up here."
+                    : "Start one with New."
               }
             />
           )
@@ -225,6 +226,7 @@ export function ConversationListScreen({
               ]}
               onPress={() => onSelect(item)}
             >
+              {item.unreadCount > 0 ? <View style={styles.unreadBar} /> : null}
               <View style={styles.avatarStack}>
                 <Avatar person={item.participants[0] ?? me} />
                 {item.participants.length > 1 ? (
@@ -247,13 +249,7 @@ export function ConversationListScreen({
                   <Text style={styles.timestamp}>{stamp}</Text>
                 </View>
                 <View style={styles.rowBottomLine}>
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.preview,
-                      item.unreadCount > 0 && styles.unreadText,
-                    ]}
-                  >
+                  <Text numberOfLines={1} style={styles.preview}>
                     {preview}
                   </Text>
                   {item.unreadCount > 0 ? (
@@ -265,21 +261,6 @@ export function ConversationListScreen({
           );
         }}
       />
-      <View pointerEvents="box-none" style={styles.fabLayer}>
-        <View
-          pointerEvents="box-none"
-          style={[styles.column, styles.fabColumn]}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="New conversation"
-            style={styles.composeButton}
-            onPress={onCreate}
-          >
-            <Feather name="edit-3" size={22} color={colors.paper} />
-          </Pressable>
-        </View>
-      </View>
     </View>
   );
 }

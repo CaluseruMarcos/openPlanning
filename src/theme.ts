@@ -1,39 +1,35 @@
 /**
- * Neutral corporate palette with a warm paper base.
+ * A cool paper-and-spine palette borrowed from a well-kept service binder.
  *
- * Slate-navy chrome anchors the tab screens, steel blue carries interaction,
- * and a muted brass marks attention (unread counts, unread rules, your own
- * reactions). Warm off-white surfaces keep the product from feeling cold.
+ * Evergreen chrome anchors the tab screens, petrol carries interaction, and a
+ * dry oxblood marks attention: unread counts, unread rules, and destructive
+ * actions. The paper base is deliberately green-gray rather than warm cream, so
+ * the product feels like a working document instead of a lifestyle brand.
  *
- * Fraunces sets the display moments — the wordmark, screen titles, and
- * conversation names — while Hanken Grotesk runs the interface. Every fontFamily
- * below is a loaded weight, so styles never rely on fontWeight (which behaves
- * differently across platforms for custom fonts).
+ * Fraunces appears once, in the wordmark. Hanken Grotesk runs the interface and
+ * all display type. Every fontFamily below is a loaded weight, so styles never
+ * rely on fontWeight (which behaves differently across platforms for custom
+ * fonts).
  */
 export const colors = {
-  ink: "#121A21",
-  inkSoft: "#3B4852",
-  muted: "#64717B",
-  faint: "#6E7A83",
-  canvas: "#F4F3EE",
-  paper: "#FFFFFF",
+  ink: "#121A17",
+  inkSoft: "#37443F",
+  muted: "#62706A",
+  faint: "#77837E",
+  canvas: "#EFF1EC",
+  paper: "#FBFCF9",
   paperBright: "#FFFFFF",
-  line: "#E1DFD7",
-  lineStrong: "#C6C4BA",
-  chrome: "#1B2A36",
-  chromeDeep: "#121E27",
-  chromeSoft: "#A9B7C2",
-  positive: "#2F7A52",
-  signal: "#8A5A22",
-  signalTint: "#F1E8D9",
-  signalBright: "#C9975A",
-  infoTint: "#E9EFF5",
-  infoText: "#3B5468",
-  accent: "#2A5C8F",
-  accentDeep: "#1D4368",
-  accentTint: "#E4ECF5",
-  danger: "#9C3A32",
-  dangerTint: "#F7E9E6",
+  line: "#DAE0D8",
+  lineStrong: "#BEC7BD",
+  chrome: "#17332D",
+  chromeDeep: "#0D211C",
+  chromeSoft: "#A9BDB4",
+  accent: "#2F5D6B",
+  accentDeep: "#234A56",
+  accentTint: "#E2ECEE",
+  signal: "#8E3B32",
+  danger: "#8E3B32",
+  dangerTint: "#F4E6E2",
 } as const;
 
 export const fonts = {
@@ -44,21 +40,14 @@ export const fonts = {
   bold: "HankenGrotesk_700Bold",
 } as const;
 
-export const radii = {
-  sm: 8,
-  md: 12,
-  lg: 18,
-  pill: 999,
-} as const;
-
 /** Muted cloth tones so avatars stay inside the palette regardless of server data. */
 const avatarTones = [
-  { background: "#2C4457", foreground: colors.paper },
-  { background: "#4A5A66", foreground: colors.paper },
-  { background: "#2E5A54", foreground: colors.paper },
-  { background: "#6B4A3C", foreground: colors.paper },
-  { background: "#4E4463", foreground: colors.paper },
-  { background: "#54626B", foreground: colors.paper },
+  { background: "#2E4A42", foreground: colors.paper },
+  { background: "#3B5560", foreground: colors.paper },
+  { background: "#6A3B36", foreground: colors.paper },
+  { background: "#4A4F3F", foreground: colors.paper },
+  { background: "#4A4058", foreground: colors.paper },
+  { background: "#536056", foreground: colors.paper },
 ] as const;
 
 export function avatarTone(id: string) {

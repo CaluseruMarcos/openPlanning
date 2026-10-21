@@ -40,13 +40,13 @@ export function BottomTabs({
               accessibilityState={{ selected: active }}
               accessibilityLabel={label}
               onPress={() => onChange(value)}
-              style={styles.tab}
+              style={[styles.tab, active && styles.tabActive]}
             >
               <View style={styles.tabIconWrap}>
                 <Feather
                   name={icon}
                   size={20}
-                  color={active ? colors.paper : colors.chromeSoft}
+                  color={active ? colors.accentDeep : colors.chromeSoft}
                 />
                 {value === "chat" && unread > 0 ? (
                   <Text style={styles.tabBadge}>

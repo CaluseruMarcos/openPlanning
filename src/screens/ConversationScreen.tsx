@@ -76,9 +76,21 @@ export function ConversationScreen({
 }) {
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState("");
+  const [inputFocused, setInputFocused] = useState(false);
   const listRef = useRef<FlatList<Message>>(null);
+  const inputRef = useRef<TextInput>(null);
 
   const canSend = draft.trim().length > 0 && !sending;
+
+  // Multiline inputs shrink-wrap on native but not on web, where a textarea
+  // keeps its rows attribute until its height is set explicitly.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const node = inputRef.current as unknown as HTMLTextAreaElement | null;
+    if (!node?.style) return;
+    node.style.height = "auto";
+    node.style.height = `${Math.min(110, Math.max(40, node.scrollHeight))}px`;
+  }, [draft]);
 
   useEffect(() => {
     setDraft("");
@@ -121,9 +133,21 @@ export function ConversationScreen({
       .map((read) => read.user);
   }
 
-  const participantNames = conversation.participants
-    .map((person) => person.name)
-    .join(", ");
+  const direct = conversation.kind === "direct";
+  const other =
+    conversation.participants.find((person) => person.id !== me.id) ??
+    conversation.participants[0];
+  const placeholder = editingMessage
+    ? "Edit message"
+    : direct && other
+      ? `Message ${firstNames([other])}`
+      : "Message";
+  const subheader =
+    typingNames.length > 0
+      ? `${typingNames.join(", ")} ${typingNames.length === 1 ? "is" : "are"} typing…`
+      : direct
+        ? "Direct message"
+        : `${conversation.participants.length + 1} participants`;
 
   return (
     <KeyboardAvoidingView
@@ -142,6 +166,7 @@ export function ConversationScreen({
       />
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel="Conversation details"
         onPress={onDetails}
         style={styles.conversationSubheader}
       >
@@ -151,11 +176,12 @@ export function ConversationScreen({
               typingNames.length > 0 ? styles.typingText : styles.subheaderText
             }
           >
-            {typingNames.length > 0
-              ? `${typingNames.join(", ")} ${typingNames.length === 1 ? "is" : "are"} typing…`
-              : `${conversation.participants.length + 1} participants`}
+            {subheader}
           </Text>
-          <Text style={styles.subheaderAction}>Details ›</Text>
+          <View style={styles.subheaderActionRow}>
+            <Text style={styles.subheaderAction}>Details</Text>
+            <Feather name="chevron-right" size={14} color={colors.accentDeep} />
+          </View>
         </View>
       </Pressable>
       <FlatList
@@ -175,11 +201,7 @@ export function ConversationScreen({
           ) : (
             <EmptyState
               title="No messages yet"
-              body={
-                participantNames
-                  ? `This is the beginning of your conversation with ${participantNames}.`
-                  : "Send the first message to start the conversation."
-              }
+              body="Send the first message."
             />
           )
         }
@@ -306,7 +328,7 @@ export function ConversationScreen({
         <View style={styles.composerContext}>
           <View style={styles.composerContextInner}>
             <View style={styles.flex}>
-              <Text style={styles.composerContextLabel}>EDITING MESSAGE</Text>
+              <Text style={styles.composerContextLabel}>Editing message</Text>
               <Text numberOfLines={1} style={styles.composerContextText}>
                 {editingMessage.body}
               </Text>
@@ -329,10 +351,10 @@ export function ConversationScreen({
           <View style={styles.composerContextInner}>
             <View style={styles.flex}>
               <Text style={styles.composerContextLabel}>
-                REPLYING TO{" "}
+                Replying to{" "}
                 {replyTo.author.id === me.id
-                  ? "YOURSELF"
-                  : replyTo.author.name.toUpperCase()}
+                  ? "yourself"
+                  : firstNames([replyTo.author])}
               </Text>
               <Text numberOfLines={1} style={styles.composerContextText}>
                 {replyTo.body}
@@ -357,17 +379,22 @@ export function ConversationScreen({
             style={styles.attachmentButton}
             onPress={onAttach}
           >
-            <Feather name="plus" size={19} color={colors.ink} />
+            <Feather name="plus" size={19} color={colors.inkSoft} />
           </Pressable>
           <TextInput
+            ref={inputRef}
             value={draft}
             onChangeText={changeDraft}
-            placeholder={
-              editingMessage ? "Edit message..." : "Write a message..."
-            }
+            placeholder={placeholder}
             placeholderTextColor={colors.faint}
-            style={styles.composerInput}
+            style={[
+              styles.composerInput,
+              inputFocused && styles.composerInputFocused,
+            ]}
             multiline
+            numberOfLines={Platform.OS === "web" ? 1 : undefined}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
             accessibilityLabel="Message"
           />
           <Pressable

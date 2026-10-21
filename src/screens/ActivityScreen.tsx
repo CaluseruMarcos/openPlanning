@@ -20,7 +20,10 @@ export function ActivityScreen({
     (conversation) => conversation.unreadCount > 0,
   );
   const recent = conversations
-    .filter((conversation) => Boolean(conversation.lastMessageAt))
+    .filter(
+      (conversation) =>
+        Boolean(conversation.lastMessageAt) && conversation.unreadCount === 0,
+    )
     .slice(0, 20);
 
   function authorFor(conversation: Conversation): Person {
@@ -48,57 +51,70 @@ export function ActivityScreen({
             <Text style={styles.wordmark}>Open Services</Text>
           </View>
         </View>
-        <Text style={styles.screenTitle}>Activity</Text>
-        <Text style={styles.screenMeta}>
-          Recent activity from your conversations.
-        </Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.screenTitle}>Activity</Text>
+          <Text style={styles.screenMeta}>
+            {unreadItems.length > 0
+              ? `${unreadItems.length} unread`
+              : "No unread conversations"}
+          </Text>
+        </View>
       </ScreenHeader>
       <ScrollView contentContainerStyle={styles.listContent}>
-        <Text style={styles.sectionLabel}>NEEDS ATTENTION</Text>
-        {unreadItems.length === 0 ? (
-          <View style={styles.activityEmpty}>
-            <Text style={styles.activityEmptyText}>You're all caught up.</Text>
-          </View>
-        ) : (
-          unreadItems.map((conversation) => (
-            <Pressable
-              key={`unread-${conversation.id}`}
-              accessibilityRole="button"
-              onPress={() => onSelect(conversation)}
-              style={({ pressed }) => [
-                styles.activityRow,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Avatar person={authorFor(conversation)} size={38} />
-              <View style={styles.activityCopy}>
-                <Text style={styles.activityTitle}>{conversation.title}</Text>
-                <Text numberOfLines={2} style={styles.activityBody}>
-                  <Text style={styles.activityAuthor}>
-                    {authorName(conversation)}:{" "}
+        {unreadItems.length > 0 ? (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Unread</Text>
+              <Text style={styles.sectionCount}>{unreadItems.length}</Text>
+            </View>
+            {unreadItems.map((conversation) => (
+              <Pressable
+                key={`unread-${conversation.id}`}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${conversation.title}`}
+                onPress={() => onSelect(conversation)}
+                style={({ pressed }) => [
+                  styles.activityRow,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Avatar person={authorFor(conversation)} size={38} />
+                <View style={styles.activityCopy}>
+                  <View style={styles.activityTitleRow}>
+                    <View style={styles.unreadDot} />
+                    <Text numberOfLines={1} style={styles.activityTitle}>
+                      {conversation.title}
+                    </Text>
+                  </View>
+                  <Text numberOfLines={2} style={styles.activityBody}>
+                    <Text style={styles.activityAuthor}>
+                      {authorName(conversation)}:{" "}
+                    </Text>
+                    {conversation.lastMessagePreview}
                   </Text>
-                  {conversation.lastMessagePreview}
+                </View>
+                <Text style={styles.timestamp}>
+                  {formatTimestamp(conversation.lastMessageAt)}
                 </Text>
-              </View>
-              <Text style={styles.timestamp}>
-                {formatTimestamp(conversation.lastMessageAt)}
-              </Text>
-            </Pressable>
-          ))
-        )}
+              </Pressable>
+            ))}
+          </>
+        ) : null}
 
-        <Text style={styles.sectionLabel}>RECENT</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Recent</Text>
+          <Text style={styles.sectionCount}>{recent.length}</Text>
+        </View>
         {recent.length === 0 ? (
-          <View style={styles.activityEmpty}>
-            <Text style={styles.activityEmptyText}>
-              New messages will appear here.
-            </Text>
-          </View>
+          <Text style={styles.activityEmptyText}>
+            Messages you have already read will show up here.
+          </Text>
         ) : (
           recent.map((conversation) => (
             <Pressable
               key={`recent-${conversation.id}`}
               accessibilityRole="button"
+              accessibilityLabel={`Open ${conversation.title}`}
               onPress={() => onSelect(conversation)}
               style={({ pressed }) => [
                 styles.activityRow,
@@ -107,8 +123,13 @@ export function ActivityScreen({
             >
               <Avatar person={authorFor(conversation)} size={38} />
               <View style={styles.activityCopy}>
-                <Text style={styles.activityTitle}>{conversation.title}</Text>
+                <Text numberOfLines={1} style={styles.activityTitle}>
+                  {conversation.title}
+                </Text>
                 <Text numberOfLines={1} style={styles.activityBody}>
+                  <Text style={styles.activityAuthor}>
+                    {authorName(conversation)}:{" "}
+                  </Text>
                   {conversation.lastMessagePreview}
                 </Text>
               </View>

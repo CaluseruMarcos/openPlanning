@@ -7,6 +7,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,13 +20,11 @@ import type { AuthMode } from "../types";
 export function SignInScreen({
   busy,
   error,
-  serverUrl,
   onSubmit,
   onClearError,
 }: {
   busy: boolean;
   error: string | null;
-  serverUrl: string;
   onSubmit: (
     mode: AuthMode,
     values: { name: string; email: string; password: string; inviteCode: string },
@@ -33,11 +32,14 @@ export function SignInScreen({
   onClearError: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const wide = width >= 900;
   const [mode, setMode] = useState<AuthMode>("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   const canSubmit =
     !busy &&
@@ -72,135 +74,164 @@ export function SignInScreen({
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <View
-          style={[styles.signInHero, { paddingTop: insets.top + 28 }]}
-        >
-          <View style={styles.signInInner}>
-            <View style={styles.brandLockup}>
-              <Logo size={30} tone="paper" />
-              <Text style={styles.wordmark}>Open Services</Text>
-            </View>
-            <Text style={styles.signInTitle}>
-              Team communication, organized.
-            </Text>
-            <Text style={styles.signInBody}>
-              {mode === "signin"
-                ? "Conversations, teams, and activity for your whole organization. Sign in to the workspace your team already shares."
-                : "Join the workspace with the invite code you were given. You can start a conversation with any member right away."}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.signInCard}>
-          <Text style={styles.signInCardTitle}>
-            {mode === "signin" ? "Welcome back" : "Create your account"}
-          </Text>
-          <Text style={styles.signInHint}>
-            {mode === "signin"
-              ? "Sign in to sync conversations in realtime."
-              : "Use the invite code from the person who invited you."}
-          </Text>
-
-          {mode === "signup" ? (
-            <>
-              <Text style={styles.inputLabel}>DISPLAY NAME</Text>
-              <TextInput
-                value={name}
-                onChangeText={setName}
-                placeholder="Your name"
-                placeholderTextColor={colors.faint}
-                style={[styles.signInInput, styles.fieldSpacing]}
-                autoCapitalize="words"
-                autoComplete="name"
-                accessibilityLabel="Display name"
-              />
-
-              <Text style={styles.inputLabel}>INVITE CODE</Text>
-              <TextInput
-                value={inviteCode}
-                onChangeText={setInviteCode}
-                placeholder="From the person who invited you"
-                placeholderTextColor={colors.faint}
-                style={[styles.signInInput, styles.fieldSpacing]}
-                autoCapitalize="characters"
-                autoCorrect={false}
-                accessibilityLabel="Invite code"
-              />
-            </>
-          ) : null}
-
-          <Text style={styles.inputLabel}>EMAIL</Text>
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@example.com"
-            placeholderTextColor={colors.faint}
-            style={[styles.signInInput, styles.fieldSpacing]}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            autoComplete="email"
-            accessibilityLabel="Email"
-          />
-
-          <Text style={styles.inputLabel}>PASSWORD</Text>
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            placeholder="At least 8 characters"
-            placeholderTextColor={colors.faint}
-            style={[styles.signInInput, styles.fieldSpacing]}
-            secureTextEntry
-            autoCapitalize="none"
-            autoComplete={mode === "signin" ? "current-password" : "new-password"}
-            accessibilityLabel="Password"
-            onSubmitEditing={submit}
-          />
-
-          {error ? <Text style={styles.authError}>{error}</Text> : null}
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !canSubmit }}
-            disabled={!canSubmit}
-            onPress={submit}
+        <View style={[styles.signInLayout, wide && styles.signInLayoutWide]}>
+          <View
             style={[
-              styles.primaryButton,
-              !canSubmit && styles.primaryButtonDisabled,
+              styles.signInHero,
+              wide && styles.signInHeroWide,
+              { paddingTop: insets.top + (wide ? 48 : 30) },
             ]}
           >
-            {busy ? (
-              <ActivityIndicator color={colors.paper} />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                {mode === "signin" ? "Sign in" : "Create account"}
+            <View style={styles.signInInner}>
+              <View style={styles.brandLockup}>
+                <Logo size={30} tone="paper" />
+                <Text style={styles.wordmark}>Open Services</Text>
+              </View>
+              <Text style={[styles.signInTitle, wide && styles.signInTitleWide]}>
+                For the team behind the service.
               </Text>
-            )}
-          </Pressable>
-
-          <Pressable
-            accessibilityRole="button"
-            onPress={toggleMode}
-            style={styles.authToggle}
-          >
-            <Text style={styles.authToggleText}>
-              {mode === "signin"
-                ? "Need an account? Create one"
-                : "Already have an account? Sign in"}
-            </Text>
-          </Pressable>
-
-          {__DEV__ ? (
-            <View style={styles.demoCard}>
-              <Text style={styles.demoTitle}>DEMO ACCOUNTS</Text>
-              <Text style={styles.demoText}>
-                marcos@example.com · openservices{"\n"}
-                sarah@example.com · openservices
+              <Text style={styles.signInBody}>
+                Messages, activity, and read receipts in one place.
               </Text>
             </View>
-          ) : null}
+          </View>
 
-          <Text style={styles.authServer}>Server: {serverUrl}</Text>
+          <View style={[styles.signInForm, wide && styles.signInFormWide]}>
+            <View style={styles.signInFormInner}>
+              <Text style={styles.signInFormTitle}>
+                {mode === "signin" ? "Sign in" : "Create account"}
+              </Text>
+              <Text style={styles.signInHint}>
+                {mode === "signin"
+                  ? "Use your account."
+                  : "Use the invite code you were given."}
+              </Text>
+
+              {mode === "signup" ? (
+                <>
+                  <Text style={styles.inputLabel}>Name</Text>
+                  <TextInput
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="Your name"
+                    placeholderTextColor={colors.faint}
+                    style={[
+                      styles.signInInput,
+                      styles.fieldSpacing,
+                      focusedField === "name" && styles.signInInputFocused,
+                    ]}
+                    autoCapitalize="words"
+                    autoComplete="name"
+                    onFocus={() => setFocusedField("name")}
+                    onBlur={() => setFocusedField(null)}
+                    accessibilityLabel="Name"
+                  />
+
+                  <Text style={styles.inputLabel}>Invite code</Text>
+                  <TextInput
+                    value={inviteCode}
+                    onChangeText={setInviteCode}
+                    placeholder="From the person who invited you"
+                    placeholderTextColor={colors.faint}
+                    style={[
+                      styles.signInInput,
+                      styles.fieldSpacing,
+                      focusedField === "inviteCode" && styles.signInInputFocused,
+                    ]}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    onFocus={() => setFocusedField("inviteCode")}
+                    onBlur={() => setFocusedField(null)}
+                    accessibilityLabel="Invite code"
+                  />
+                </>
+              ) : null}
+
+              <Text style={styles.inputLabel}>Email</Text>
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@example.com"
+                placeholderTextColor={colors.faint}
+                style={[
+                  styles.signInInput,
+                  styles.fieldSpacing,
+                  focusedField === "email" && styles.signInInputFocused,
+                ]}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                autoComplete="email"
+                onFocus={() => setFocusedField("email")}
+                onBlur={() => setFocusedField(null)}
+                accessibilityLabel="Email"
+              />
+
+              <Text style={styles.inputLabel}>Password</Text>
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                placeholder="At least 8 characters"
+                placeholderTextColor={colors.faint}
+                style={[
+                  styles.signInInput,
+                  styles.fieldSpacing,
+                  focusedField === "password" && styles.signInInputFocused,
+                ]}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                onFocus={() => setFocusedField("password")}
+                onBlur={() => setFocusedField(null)}
+                accessibilityLabel="Password"
+                onSubmitEditing={submit}
+              />
+
+              {error ? <Text style={styles.authError}>{error}</Text> : null}
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !canSubmit }}
+                disabled={!canSubmit}
+                onPress={submit}
+                style={[
+                  styles.primaryButton,
+                  !canSubmit && styles.primaryButtonDisabled,
+                ]}
+              >
+                {busy ? (
+                  <ActivityIndicator color={colors.paper} />
+                ) : (
+                  <Text style={styles.primaryButtonText}>
+                    {mode === "signin" ? "Sign in" : "Create account"}
+                  </Text>
+                )}
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="button"
+                onPress={toggleMode}
+                style={styles.authToggle}
+              >
+                <Text style={styles.authToggleText}>
+                  {mode === "signin"
+                    ? "New here? Create an account"
+                    : "Already have an account? Sign in"}
+                </Text>
+              </Pressable>
+
+              {__DEV__ ? (
+                <View style={styles.demoBlock}>
+                  <Text style={styles.demoTitle}>Demo accounts</Text>
+                  <Text style={styles.demoText}>
+                    marcos@example.com{"\n"}
+                    sarah@example.com{"\n"}
+                    Password for both: openservices
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
