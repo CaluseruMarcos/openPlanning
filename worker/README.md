@@ -19,17 +19,47 @@ polyfill.
 | `src/router.ts` | Auth, conversation, message, reaction, read, typing, and realtime routes |
 | `src/auth.ts` | PBKDF2 passwords, bearer sessions, signed WebSocket tickets |
 | `src/db.ts` | D1 queries and API serializers |
+| `src/invites.ts` | Invite codes and the admin key check |
 | `src/realtime.ts` | `UserHub` Durable Object and fan-out |
 | `migrations/0001_init.sql` | D1 schema |
+| `migrations/0002_invites.sql` | Invite code table |
 | `seed.mjs` | Idempotent demo workspace seed |
+| `invite.mjs` | Create and list invite codes |
 | `.secrets.local` | Gitignored copy of the deployed secrets |
+
+## Adding people to a deployment
+
+Registration is closed. An account only exists when an owner hands out an
+invite code:
+
+```sh
+npm run worker:invite
+# or: npm run worker:invite -- --email someone@example.com --note "for Sarah"
+
+Invite code: FURW3ENHVSFA
+Valid until: 2026-10-24T10:58:33.868Z
+```
+
+The person enters that code in the sign-up form together with their email and
+a password. A code works once, expires after 72 hours by default
+(`--hours 24`), and can be bound to one address (`--email`). Only the hash of
+the code is stored.
+
+`npm run worker:invite -- list` shows the codes and whether they were used.
+
+The script talks to the admin endpoint of the deployment, so it needs the
+admin key. It reads `ADMIN_KEY` from the environment or from
+`worker/.secrets.local` (gitignored), and falls back to `worker/.dev.vars` for
+local development. The key is a Worker secret and is never part of the
+repository.
 
 ## Local development
 
 ```sh
 # from the repository root
 cp worker/.dev.vars.example worker/.dev.vars
-# edit the two secrets; any long random strings are fine for local dev
+# set SESSION_SECRET, TICKET_SECRET and ADMIN_KEY
+# to random strings of at least 32 characters
 
 npm run worker:migrate:local
 npm run worker:dev
@@ -49,6 +79,9 @@ Seed the demo accounts (in a second terminal):
 npm run worker:seed
 # or: WORKER_URL=http://127.0.0.1:8788/api node worker/seed.mjs
 ```
+
+The seed asks the admin endpoint for an invite code per account, so it needs
+the same admin key.
 
 Demo accounts, password `openservices`:
 
@@ -75,7 +108,9 @@ npm run typecheck:worker
 
 ## What is implemented
 
-- Email/password signup, signin, signout, session restore, and token refresh
+- Email/password signin, signout, session restore, and token refresh
+- Invite only registration: codes are created by the owner, work once and
+  expire
 - D1 schema and migrations with explicit membership checks on every route
 - Conversation list/create/delete, direct-conversation reuse, participants
 - Paginated messages with reactions and quoted-reply expansion
@@ -125,6 +160,7 @@ Edit*, and *Account Settings: Read*:
 export CLOUDFLARE_API_TOKEN=...
 npx wrangler secret put SESSION_SECRET -c worker/wrangler.toml
 npx wrangler secret put TICKET_SECRET  -c worker/wrangler.toml
+npx wrangler secret put ADMIN_KEY      -c worker/wrangler.toml
 npm run worker:deploy
 ```
 
@@ -150,7 +186,11 @@ resulting Worker is identical to what `wrangler deploy` produces.
    ```sh
    npx wrangler secret put SESSION_SECRET -c worker/wrangler.toml
    npx wrangler secret put TICKET_SECRET -c worker/wrangler.toml
+   npx wrangler secret put ADMIN_KEY -c worker/wrangler.toml
    ```
+
+   All three need at least 32 characters. `ADMIN_KEY` protects the endpoints
+   that create invite codes.
 
 3. Change `APP_ORIGIN` in `wrangler.toml` to the deployed Pages origin. It is
    currently `*`, which allows any browser origin. Narrow it to the Pages

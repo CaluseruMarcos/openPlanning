@@ -862,6 +862,7 @@ export async function signUp(
   name: string,
   email: string,
   password: string,
+  inviteCode: string,
 ): Promise<SessionUser> {
   const data = await apiFetch<{ token: string; user: ApiUser }>(
     "/api/auth/signup",
@@ -872,6 +873,7 @@ export async function signUp(
         name: name.trim(),
         email: email.trim(),
         password,
+        inviteCode: inviteCode.trim(),
       }),
     },
   );

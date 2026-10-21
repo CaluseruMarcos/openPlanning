@@ -14,6 +14,7 @@
     "worker:migrate:local": "wrangler d1 migrations apply DB -c worker/wrangler.toml --local",
     "worker:deploy": "wrangler deploy -c worker/wrangler.toml",
     "worker:seed": "node worker/seed.mjs",
+    "worker:invite": "node worker/invite.mjs",
     "backend:setup": "cd backend && ./setup.sh",
     "backend": "cd backend && ./start.sh",
     "seed": "node backend/seed.mjs"

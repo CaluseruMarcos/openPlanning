@@ -360,7 +360,12 @@ export function AppShell() {
 
   async function handleAuth(
     mode: AuthMode,
-    values: { name: string; email: string; password: string },
+    values: {
+      name: string;
+      email: string;
+      password: string;
+      inviteCode: string;
+    },
   ) {
     setAuthBusy(true);
     setAuthError(null);
@@ -369,7 +374,12 @@ export function AppShell() {
       const user =
         mode === "signin"
           ? await signIn(values.email, values.password)
-          : await signUp(values.name, values.email, values.password);
+          : await signUp(
+              values.name,
+              values.email,
+              values.password,
+              values.inviteCode,
+            );
 
       setSession({ user: toPersonFromSession(user), email: user.email });
       await workspace.loadWorkspace(

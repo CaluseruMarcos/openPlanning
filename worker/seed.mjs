@@ -1,15 +1,24 @@
 #!/usr/bin/env node
-// Seed the local Cloudflare Worker backend with demo accounts and one chat.
-// The script is idempotent: existing users are signed in, existing direct
-// conversations are reused, and the demo message is only sent once.
+// Seeds the demo accounts and one chat.
+//
+// Registration is invite only, so the script asks the admin endpoint for an
+// invite code per account. It is idempotent: existing users are signed in,
+// existing direct conversations are reused, and the demo message is only sent
+// once.
 //
 // Usage:
 //   node worker/seed.mjs
 //   WORKER_URL=http://127.0.0.1:8787/api node worker/seed.mjs
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, "..");
+
 const BASE_URL = (process.env.WORKER_URL ?? "http://127.0.0.1:8787/api").replace(
   /\/+$/,
-  "",
 );
 const DEMO_PASSWORD = process.env.WORKER_DEMO_PASSWORD ?? "openservices";
 
@@ -19,12 +28,27 @@ const USERS = [
   { name: "Michael Johnson", email: "michael@example.com" },
 ];
 
-async function request(path, { method = "GET", token, body } = {}) {
+function readKeyFrom(file) {
+  try {
+    const match = readFileSync(file, "utf8").match(/^ADMIN_KEY=(.+)$/m);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+const ADMIN_KEY =
+  process.env.ADMIN_KEY?.trim() ||
+  readKeyFrom(join(root, "worker", ".secrets.local")) ||
+  readKeyFrom(join(root, "worker", ".dev.vars"));
+
+async function request(path, { method = "GET", token, body, admin } = {}) {
   const response = await fetch(`${BASE_URL}${path}`, {
     method,
     headers: {
       Accept: "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(admin ? { "X-Admin-Key": ADMIN_KEY ?? "" } : {}),
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -47,11 +71,29 @@ async function request(path, { method = "GET", token, body } = {}) {
   return data;
 }
 
+async function createInvite(email) {
+  if (!ADMIN_KEY) {
+    throw new Error(
+      "No admin key. Set ADMIN_KEY or add it to worker/.secrets.local.",
+    );
+  }
+  const invite = await request("/admin/invites", {
+    method: "POST",
+    admin: true,
+    body: { email, lifetimeHours: 1 },
+  });
+  return invite.code;
+}
+
 async function ensureUser(user) {
   try {
     return await request("/auth/signup", {
       method: "POST",
-      body: { ...user, password: DEMO_PASSWORD },
+      body: {
+        ...user,
+        password: DEMO_PASSWORD,
+        inviteCode: await createInvite(user.email),
+      },
     });
   } catch (error) {
     if (error.status === 409) {
@@ -62,8 +104,8 @@ async function ensureUser(user) {
     }
     if (error.status === 429) {
       throw new Error(
-        `The server is rate limiting registrations from this address (429). ` +
-          `Wait a little and run the seed again.`,
+        "The server is rate limiting registrations from this address (429). " +
+          "Wait a little and run the seed again.",
       );
     }
     throw error;

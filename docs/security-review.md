@@ -89,11 +89,17 @@ added, deeper fix open), **Open** (needs a decision or a bigger change),
 | 29 | The bearer token lives in `localStorage` in the web build. | High | The fix is an `HttpOnly` session cookie plus a CSRF strategy, which is a redesign of the auth flow. Native builds already use `SecureStore`. |
 | 30 | Any user can start a group conversation with any other user, without consent. | Medium | Needs invites with acceptance, a leave route and a block list. |
 | 31 | `/api/people` lists every account. | Medium | Needs a concept of visible colleagues. |
-| 32 | Signup answers `409` for an existing email, which confirms that an address is registered. | Low | Removing it needs email verification, because the client needs a token right away. The rate limit slows the enumeration. |
-| 33 | Fan-out costs one Durable Object call per member per event, is awaited inside the request, and drops failures silently. | High | A conversation-scoped Durable Object with an outbox would fix the cost and the delivery guarantee. That is an architecture change. |
-| 34 | No email verification and no password reset. | Medium | Needs an email sender. |
-| 35 | Unexpected errors are logged raw, which can include query text. | Low | Workers logs should be access-controlled and shortened. |
-| 36 | The email check is loose and does not normalize unicode. | Low | Cosmetic next to the above. |
+| 32 | Fan-out costs one Durable Object call per member per event, is awaited inside the request, and drops failures silently. | High | A conversation-scoped Durable Object with an outbox would fix the cost and the delivery guarantee. That is an architecture change. |
+| 33 | No email verification and no password reset. | Medium | Needs an email sender. |
+| 34 | Unexpected errors are logged raw, which can include query text. | Low | Workers logs should be access-controlled and shortened. |
+| 35 | The email check is loose and does not normalize unicode. | Low | Cosmetic next to the above. |
+
+## Resolved since the review
+
+| # | Finding | Severity | Resolution |
+|---|---|---|---|
+| 36 | Open self-service registration: anyone could create an account, which also burns the daily D1 write quota. | High | Registration now requires an invite code. The owner creates codes with `npm run worker:invite`; a code works once, expires, can be bound to one address and is stored only as a hash. The endpoints that create codes need a separate admin key. |
+| 37 | Signup answered `409` for an existing email, which confirmed that an address is registered. | Low | Unreachable in practice now: only someone with a valid invite code can reach the check, and the invite is bound to the address it was issued for. |
 
 ## How the checks were run
 

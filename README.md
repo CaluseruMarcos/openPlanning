@@ -44,6 +44,17 @@ Point the app at it with `EXPO_PUBLIC_API_URL=https://open-services-api.snorlaxk
 Setup, redeploy steps, and the seeded demo accounts are documented in
 [`worker/README.md`](worker/README.md).
 
+**Registration is invite only.** Nobody can sign up on their own. To add
+someone, create a code and share it:
+
+```sh
+npm run worker:invite
+# Invite code: FURW3ENHVSFA
+```
+
+The person enters that code in the sign-up form. A code works once and
+expires.
+
 The original **PocketBase** backend remains under
 [`backend/`](backend/README.md) as a reference and rollback path; the client no
 longer imports the PocketBase SDK or SSE polyfill.

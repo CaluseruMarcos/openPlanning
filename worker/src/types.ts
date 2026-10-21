@@ -8,8 +8,8 @@ export type Env = {
   SESSION_TTL_DAYS?: string;
   PBKDF2_ITERATIONS?: string;
   ENVIRONMENT?: string;
-  /** "false" closes self-service registration for this deployment. */
-  ALLOW_SIGNUP?: string;
+  /** Key for the admin endpoints that create invite codes. */
+  ADMIN_KEY?: string;
 };
 
 export type UserRow = {

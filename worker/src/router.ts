@@ -42,6 +42,12 @@ import {
   readJson,
   stringField,
 } from "./http";
+import {
+  assertAdminKey,
+  checkInvite,
+  createInvite,
+  listInvites,
+} from "./invites";
 import { publishToUsers } from "./realtime";
 import { clientIp, throttle } from "./throttle";
 import type { AuthContext, Env } from "./types";
@@ -149,6 +155,24 @@ async function signup(request: Request, env: Env): Promise<Response> {
     throw new HttpError(400, "invalid_email", "Enter a valid email address.");
   }
 
+  // Registration is closed. An account only exists when an owner handed out an
+  // invite code.
+  const inviteCode = stringField(body, "inviteCode", { min: 8, max: 32 });
+  const invite = await checkInvite(env, inviteCode, email);
+  if (!invite.ok) {
+    throw new HttpError(
+      400,
+      "invalid_invite",
+      invite.reason === "used"
+        ? "This invite code has already been used."
+        : invite.reason === "expired"
+          ? "This invite code has expired. Ask for a new one."
+          : invite.reason === "email_mismatch"
+            ? "This invite code was issued for a different email address."
+            : "This invite code is not valid.",
+    );
+  }
+
   // Derive the password before looking the account up: an existing email must
   // not answer faster than an unknown one.
   const passwordHash = await hashPassword(password, env);
@@ -164,13 +188,18 @@ async function signup(request: Request, env: Env): Promise<Response> {
   const userId = newId();
   const now = nowIso();
   try {
-    await env.DB.prepare(
-      `INSERT INTO users
-        (id, email, name, password_hash, email_verified_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
-    )
-      .bind(userId, email, name, passwordHash, now, now)
-      .run();
+    // The account and the consumed invite are written together, so a code can
+    // never be used twice.
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO users
+          (id, email, name, password_hash, email_verified_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+      ).bind(userId, email, name, passwordHash, now, now),
+      env.DB.prepare(
+        `UPDATE invites SET used_at = ?, used_by = ? WHERE id = ?`,
+      ).bind(now, userId, invite.invite?.id ?? ""),
+    ]);
   } catch (error) {
     if (isUniqueConstraint(error)) {
       throw new HttpError(
@@ -783,13 +812,6 @@ export async function handleApiRequest(
   }
 
   if (path === "/auth/signup" && method === "POST") {
-    if (env.ALLOW_SIGNUP === "false") {
-      throw new HttpError(
-        403,
-        "signup_disabled",
-        "Registration is closed on this deployment.",
-      );
-    }
     const perIp = throttle(
       `signup:${clientIp(request)}`,
       20,
@@ -818,6 +840,37 @@ export async function handleApiRequest(
   }
   if (path === "/realtime" && method === "GET") {
     return realtime(request, env, url);
+  }
+
+  // Admin endpoints. They are the only way to add people to a deployment.
+  if (path === "/admin/invites" && (method === "GET" || method === "POST")) {
+    assertAdminKey(request, env);
+    if (method === "GET") {
+      const invites = await listInvites(env);
+      return jsonResponse({
+        items: invites.map((invite) => ({
+          id: invite.id,
+          email: invite.email,
+          note: invite.note,
+          createdAt: invite.created_at,
+          expiresAt: invite.expires_at,
+          usedAt: invite.used_at,
+          usedBy: invite.used_by,
+        })),
+      });
+    }
+
+    const body = await readJson<Record<string, unknown>>(request);
+    const email = optionalStringField(body, "email", 254);
+    const note = optionalStringField(body, "note", 200);
+    const lifetimeHours =
+      typeof body.lifetimeHours === "number" ? body.lifetimeHours : undefined;
+    const invite = await createInvite(env, {
+      email: email ? normalizeEmail(email) : null,
+      note,
+      lifetimeHours,
+    });
+    return jsonResponse(invite, 201);
   }
 
   const auth = await authenticate(request, env);
