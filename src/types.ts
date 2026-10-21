@@ -61,3 +61,21 @@ export type Conversation = {
 };
 
 export type NotificationPref = "all" | "mentions" | "muted";
+
+export type Tab = "chat" | "activity" | "profile";
+
+export type ConversationFilter = "all" | "unread" | "teams";
+
+export type SheetName =
+  | "menu"
+  | "attach"
+  | "delete"
+  | "about"
+  | "message"
+  | "messageDelete"
+  | "readBy"
+  | null;
+
+export type AuthMode = "signin" | "signup";
+
+export type Session = { user: Person; email: string };
