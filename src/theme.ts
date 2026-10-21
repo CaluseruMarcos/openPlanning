@@ -1,11 +1,14 @@
 /**
  * Neutral corporate palette with a warm paper base.
  *
- * Slate-navy chrome anchors the tab screens, a single steel-blue accent carries
- * every action, and warm off-white surfaces keep the product from feeling cold.
- * The serif is reserved for the brand mark; all interface type is Hanken
- * Grotesk. Every fontFamily below is a loaded weight, so styles never rely on
- * fontWeight (which behaves differently across platforms for custom fonts).
+ * Slate-navy chrome anchors the tab screens, steel blue carries interaction,
+ * and a muted brass marks attention (unread counts, unread rules, your own
+ * reactions). Warm off-white surfaces keep the product from feeling cold.
+ *
+ * Fraunces sets the display moments — the wordmark, screen titles, and
+ * conversation names — while Hanken Grotesk runs the interface. Every fontFamily
+ * below is a loaded weight, so styles never rely on fontWeight (which behaves
+ * differently across platforms for custom fonts).
  */
 export const colors = {
   ink: "#121A21",
@@ -21,6 +24,9 @@ export const colors = {
   chromeDeep: "#121E27",
   chromeSoft: "#A9B7C2",
   positive: "#2F7A52",
+  signal: "#8A5A22",
+  signalTint: "#F1E8D9",
+  signalBright: "#C9975A",
   infoTint: "#E9EFF5",
   infoText: "#3B5468",
   accent: "#2A5C8F",
