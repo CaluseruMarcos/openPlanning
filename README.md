@@ -20,14 +20,27 @@ This repository intentionally avoids shipping large generated binaries in Git hi
 - JavaScript / TypeScript
 - React + React Native (Expo)
 - Expo SDK (project scripts in package.json)
-- PocketBase (lightweight backend used in the code)
+- PocketBase 0.40 (MIT) — SQLite, email/password auth, REST API, realtime SSE
 - Build/analysis tools used locally (jadx, apktool) — not tracked in git history
 
 ---
 
+## Backend & authentication
+The rebuild talks to a local, self-hostable **PocketBase** instance for accounts,
+conversations, and messages. Email/password auth is implemented now; native tokens
+are stored in SecureStore and the web build uses localStorage-backed storage.
+Messages and conversation summaries sync over realtime SSE, and message history is
+searchable through the API.
+
+Planning Center OAuth linking is deferred until client credentials and a registered
+callback are available. The access rules, schema, seed data, and deployment notes
+live in [`backend/README.md`](backend/README.md).
+
+---
+
 ## Repository layout (high level)
-- `src/` — application source (React & TypeScript)
-- `backend/` — optional backend code (if present)
+- `src/` — application source (React & TypeScript), PocketBase client, and local preferences
+- `backend/` — PocketBase server setup, migrations, hooks, and demo seed
 - `.expo/`, `android/`, `ios/` — platform metadata (when present)
 - `tools/` — helper tools (large jars were removed from history; download as needed)
 - `apk/`, `apktool_out/`, `extracted/`, `decompiled/`, `analysis/` — generated/reverse-engineering artifacts (archived locally, not tracked)
@@ -47,6 +60,36 @@ npm install
 # or
 # yarn install
 ```
+
+Start the local backend (first run downloads the PocketBase binary):
+
+```bash
+cd backend
+./setup.sh
+./start.sh
+```
+
+In a second terminal, seed the demo workspace:
+
+```bash
+cd backend
+node seed.mjs
+```
+
+Demo accounts (password `openservices`): `marcos@example.com`,
+`sarah@example.com`, `michael@example.com`. The local admin dashboard is at
+`http://127.0.0.1:8090/_/` (`admin@openservices.local` / `devpassword` — dev only).
+See [`backend/README.md`](backend/README.md) for details and production notes.
+
+Then start the app with the backend URL (copy `.env.example` to `.env` if you
+prefer):
+
+```bash
+EXPO_PUBLIC_POCKETBASE_URL=http://127.0.0.1:8090 npm run web
+```
+
+For the Android emulator use `http://10.0.2.2:8090`; for a physical device use
+your computer's LAN address.
 
 Type-check the source:
 

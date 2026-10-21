@@ -52,15 +52,32 @@ Created by the idempotent migrations in `pb_migrations/`:
   Signed-in users can list each other to start conversations; emails stay hidden
   unless `emailVisibility` is enabled.
 - `conversations` — `title`, `kind` (`direct` | `team` | `group`),
-  `created_by`, `participants` (multi-relation), and a denormalised
-  `last_message_preview` / `last_message_at` / `last_message_author` summary.
+  `created_by`, `participants` (multi-relation, including the creator), and a
+  denormalised `last_message_preview` / `last_message_at` /
+  `last_message_author` summary.
 - `messages` — `conversation`, `author`, `body`.
 
 Rules enforce that only the creator or a participant can read a conversation and
 its messages, and that messages can only be created as the authenticated user.
 
 `pb_hooks/main.pb.js` updates the conversation summary after each message without
-a client round trip.
+a client round trip. It also recomputes the summary when a message is deleted.
+
+## App integration
+
+- The Expo app reads `EXPO_PUBLIC_POCKETBASE_URL` (see the root `.env.example`).
+  It defaults to `http://127.0.0.1:8090` on web/iOS and `http://10.0.2.2:8090`
+  on Android (emulator loopback).
+- Native auth tokens are stored in `expo-secure-store`; the web build uses
+  AsyncStorage/localStorage. The session is refreshed on launch.
+- Conversations and messages are fetched from the REST API. Realtime updates use
+  SSE; React Native needs the `react-native-sse` polyfill that
+  `src/api/pocketbase.ts` installs.
+- Local read, mute, and notification preferences live in AsyncStorage. Unread
+  badges are per device and approximate: one badge per unread conversation, not
+  one per unread message.
+- Search queries PocketBase for matching message bodies (in addition to local
+  title/participant/preview matching), so older messages are searchable.
 
 ## Data and reset
 
