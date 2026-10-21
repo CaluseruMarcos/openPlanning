@@ -179,6 +179,25 @@ and create the bucket when the upload endpoint is implemented.
 
 ## Security and free-tier notes
 
+The full review, including the findings that are still open, is in
+[`docs/security-review.md`](../docs/security-review.md). The behaviour that
+matters for operating this Worker:
+
+- `SESSION_SECRET` and `TICKET_SECRET` must be set and at least 32 characters
+  long. There is no built-in default: a missing secret fails the request
+  instead of falling back to a known key.
+- Sign-in and sign-up are throttled per client address
+  (`429` with `Retry-After`): 10 attempts per account and 50 per address per
+  10 minutes for sign-in, 20 registrations per address per hour. Set
+  `ALLOW_SIGNUP = "false"` to close registration entirely.
+- Every response carries `Cache-Control: no-store`, `X-Content-Type-Options:
+  nosniff`, `Strict-Transport-Security`, `Referrer-Policy` and
+  `Content-Security-Policy: default-src 'none'`.
+- Request bodies above 64 KB are rejected before they are parsed.
+- The API is only served under `/api`.
+- A realtime ticket is bound to the session that requested it and stops
+  working when that session is signed out.
+
 ### Password hashing CPU
 
 Passwords use PBKDF2-SHA-256 with 100,000 iterations. In a local Node benchmark
@@ -206,13 +225,17 @@ experiments.
 
 ### Not implemented yet
 
-- Rate limiting for signin/signup/typing. Add Cloudflare rate limiting or a
-  small limiter before public exposure.
+- A global rate limit. The in-Worker throttle is per isolate, so it slows
+  scripted abuse but is not a quota. Use Cloudflare rate limiting rules (or a
+  Durable Object limiter) in front of the Worker before public exposure.
 - Email verification and password reset.
 - Admin dashboard.
 - Attachment upload/download through R2 (the bucket and binding are not created
   yet).
 - PocketBase data import or bcrypt-compatible password migration. A fresh D1
   database plus `worker/seed.mjs` is the supported starting point.
-- Single-use WebSocket tickets. Tickets are signed and expire after 60 seconds,
-  but a stolen ticket can be replayed during that window.
+- Single-use WebSocket tickets. Tickets are signed, bound to a session and
+  expire after 60 seconds, but a stolen ticket can be replayed during that
+  window.
+- Full-text search. The message search scans a 90 day window instead of using
+  D1 FTS5.

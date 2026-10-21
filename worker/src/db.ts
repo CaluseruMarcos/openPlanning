@@ -47,6 +47,14 @@ function placeholders(count: number): string {
   return new Array(count).fill("?").join(", ");
 }
 
+function chunk<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
 export function toPublicPerson(row: {
   id: string;
   name: string;
@@ -203,18 +211,24 @@ export async function listConversations(
   if (rows.length === 0) return [];
 
   const ids = rows.map((row) => row.id);
-  const { results: memberRows } = await env.DB.prepare(
-    `SELECT cm.conversation_id, u.id, u.name
-     FROM conversation_members cm
-     JOIN users u ON u.id = cm.user_id
-     WHERE cm.conversation_id IN (${placeholders(ids.length)})
-     ORDER BY u.name COLLATE NOCASE ASC`,
-  )
-    .bind(...ids)
-    .all<{ conversation_id: string; id: string; name: string }>();
+  // D1 accepts at most 100 bound parameters per query, so the participant
+  // lookup is chunked instead of binding one id per conversation.
+  const members: { conversation_id: string; id: string; name: string }[] = [];
+  for (const idChunk of chunk(ids, 50)) {
+    const { results: memberRows } = await env.DB.prepare(
+      `SELECT cm.conversation_id, u.id, u.name
+       FROM conversation_members cm
+       JOIN users u ON u.id = cm.user_id
+       WHERE cm.conversation_id IN (${placeholders(idChunk.length)})
+       ORDER BY u.name COLLATE NOCASE ASC`,
+    )
+      .bind(...idChunk)
+      .all<{ conversation_id: string; id: string; name: string }>();
+    members.push(...memberRows);
+  }
 
   const participants = new Map<string, PublicPerson[]>();
-  for (const member of memberRows) {
+  for (const member of members) {
     const list = participants.get(member.conversation_id) ?? [];
     list.push({ id: member.id, name: member.name });
     participants.set(member.conversation_id, list);
@@ -266,15 +280,19 @@ export async function searchConversationIds(
   userId: string,
   needle: string,
 ): Promise<string[]> {
+  // The search is a scan, so it only covers a recent window instead of the
+  // whole message history.
+  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
   const { results } = await env.DB.prepare(
     `SELECT DISTINCT m.conversation_id
      FROM messages m
      JOIN conversation_members cm
        ON cm.conversation_id = m.conversation_id AND cm.user_id = ?
-     WHERE instr(lower(m.body), lower(?)) > 0
+     WHERE m.created_at >= ?
+       AND instr(lower(m.body), lower(?)) > 0
      LIMIT 100`,
   )
-    .bind(userId, needle)
+    .bind(userId, since, needle)
     .all<{ conversation_id: string }>();
   return results.map((row) => row.conversation_id);
 }
@@ -331,20 +349,22 @@ export async function listReactionsForMessages(
   const byMessage = new Map<string, ApiReaction[]>();
   if (messageIds.length === 0) return byMessage;
 
-  const { results } = await env.DB.prepare(
-    `SELECT r.*, u.name AS user_name
-     FROM message_reactions r
-     JOIN users u ON u.id = r.user_id
-     WHERE r.message_id IN (${placeholders(messageIds.length)})
-     ORDER BY r.created_at ASC, r.id ASC`,
-  )
-    .bind(...messageIds)
-    .all<ReactionRow>();
+  for (const ids of chunk(messageIds, 50)) {
+    const { results } = await env.DB.prepare(
+      `SELECT r.*, u.name AS user_name
+       FROM message_reactions r
+       JOIN users u ON u.id = r.user_id
+       WHERE r.message_id IN (${placeholders(ids.length)})
+       ORDER BY r.created_at ASC, r.id ASC`,
+    )
+      .bind(...ids)
+      .all<ReactionRow>();
 
-  for (const row of results) {
-    const list = byMessage.get(row.message_id) ?? [];
-    list.push(toApiReaction(row));
-    byMessage.set(row.message_id, list);
+    for (const row of results) {
+      const list = byMessage.get(row.message_id) ?? [];
+      list.push(toApiReaction(row));
+      byMessage.set(row.message_id, list);
+    }
   }
   return byMessage;
 }

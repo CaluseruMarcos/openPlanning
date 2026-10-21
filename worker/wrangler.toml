@@ -7,6 +7,8 @@ workers_dev = true
 ENVIRONMENT = "production"
 SESSION_TTL_DAYS = "30"
 PBKDF2_ITERATIONS = "100000"
+# Set to "false" to close self-service registration on this deployment.
+ALLOW_SIGNUP = "true"
 # Allowed browser origins for the API. Narrow this to the deployed Pages
 # origin (for example "https://open-services.pages.dev") once the web build
 # lives on Cloudflare Pages. "*" keeps native builds and any web host working.

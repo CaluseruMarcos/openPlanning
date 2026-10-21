@@ -34,6 +34,9 @@ export async function publishToUsers(
 }
 
 export class UserHub implements DurableObject {
+  /** A single user may not keep an unbounded number of parallel sockets. */
+  private static readonly MAX_SOCKETS = 5;
+
   constructor(
     private readonly state: DurableObjectState,
     private readonly env: Env,
@@ -48,6 +51,9 @@ export class UserHub implements DurableObject {
         event = (await request.json()) as RealtimeEvent;
       } catch {
         return new Response("Invalid event", { status: 400 });
+      }
+      if (!isKnownEvent(event)) {
+        return new Response("Unknown event", { status: 400 });
       }
       this.broadcast(event);
       return new Response(null, { status: 204 });
@@ -65,6 +71,7 @@ export class UserHub implements DurableObject {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.state.acceptWebSocket(server);
+    this.enforceSocketLimit();
 
     server.send(
       JSON.stringify({
@@ -122,4 +129,40 @@ export class UserHub implements DurableObject {
       }
     }
   }
+
+  /** Closes the oldest sockets once a user exceeds the parallel limit. */
+  private enforceSocketLimit(): void {
+    const sockets = this.state.getWebSockets();
+    if (sockets.length <= UserHub.MAX_SOCKETS) return;
+    for (const socket of sockets.slice(0, sockets.length - UserHub.MAX_SOCKETS)) {
+      try {
+        socket.close(1012, "Too many connections");
+      } catch {
+        // The socket is already gone.
+      }
+    }
+  }
+}
+
+const KNOWN_EVENT_TYPES = new Set([
+  "ready",
+  "message.created",
+  "message.updated",
+  "message.deleted",
+  "conversation.created",
+  "conversation.updated",
+  "conversation.deleted",
+  "reaction.added",
+  "reaction.removed",
+  "read.updated",
+  "typing.updated",
+  "typing.stopped",
+  "error",
+]);
+
+/** The Durable Object only forwards events it knows about. */
+function isKnownEvent(event: unknown): event is RealtimeEvent {
+  if (!event || typeof event !== "object") return false;
+  const type = (event as { type?: unknown }).type;
+  return typeof type === "string" && KNOWN_EVENT_TYPES.has(type);
 }

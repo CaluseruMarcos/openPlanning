@@ -156,13 +156,15 @@ export function SignInScreen({
           </Text>
         </Pressable>
 
-        <View style={styles.demoCard}>
-          <Text style={styles.demoTitle}>DEMO ACCOUNTS</Text>
-          <Text style={styles.demoText}>
-            marcos@example.com · openservices{"\n"}
-            sarah@example.com · openservices
-          </Text>
-        </View>
+        {__DEV__ ? (
+          <View style={styles.demoCard}>
+            <Text style={styles.demoTitle}>DEMO ACCOUNTS</Text>
+            <Text style={styles.demoText}>
+              marcos@example.com · openservices{"\n"}
+              sarah@example.com · openservices
+            </Text>
+          </View>
+        ) : null}
 
         <Text style={styles.authServer}>Server: {serverUrl}</Text>
       </ScrollView>

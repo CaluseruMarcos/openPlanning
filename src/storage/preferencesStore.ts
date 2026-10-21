@@ -52,3 +52,19 @@ export async function loadPreferences(): Promise<Preferences> {
 export async function savePreferences(preferences: Preferences): Promise<void> {
   await AsyncStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
 }
+
+/** Removes everything stored for one user, for example on sign out. */
+export async function clearPreferencesForUser(userId: string): Promise<void> {
+  const preferences = await loadPreferences();
+  const withoutUser = <T>(record: Record<string, T>): Record<string, T> => {
+    const next = { ...record };
+    delete next[userId];
+    return next;
+  };
+
+  await savePreferences({
+    readAtByUser: withoutUser(preferences.readAtByUser),
+    mutedByUser: withoutUser(preferences.mutedByUser),
+    notificationPrefByUser: withoutUser(preferences.notificationPrefByUser),
+  });
+}

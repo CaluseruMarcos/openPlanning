@@ -1,5 +1,8 @@
 import type { Env } from "./types";
 
+/** Every field in this API is small; anything above this is abuse. */
+const MAX_BODY_BYTES = 64 * 1024;
+
 export class HttpError extends Error {
   readonly status: number;
   readonly code: string;
@@ -83,23 +86,46 @@ export function allowedOrigin(request: Request, env: Env): string | null {
   return isLocalOrigin(origin) ? origin : null;
 }
 
+/**
+ * Final response pass: security headers plus CORS.
+ *
+ * The API is token-authenticated (never cookie-authenticated), so CORS is not
+ * an authentication boundary. It only stops a random website from reading
+ * responses of a request it made on its own.
+ */
 export function withCors(
   response: Response,
   request: Request,
   env: Env,
 ): Response {
-  const origin = allowedOrigin(request, env);
-  if (!origin) return response;
-
   const headers = new Headers(response.headers);
-  headers.set("Access-Control-Allow-Origin", origin);
-  headers.set("Vary", "Origin");
-  headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+
+  // API responses carry conversation content and must never be cached.
+  headers.set("Cache-Control", "no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "no-referrer");
+  headers.set("Content-Security-Policy", "default-src 'none'");
   headers.set(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PATCH, PUT, DELETE, OPTIONS",
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains",
   );
-  headers.set("Access-Control-Max-Age", "86400");
+
+  const origin = allowedOrigin(request, env);
+  if (origin) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    const vary = headers.get("Vary");
+    if (!vary) headers.set("Vary", "Origin");
+    else if (!vary.toLowerCase().split(",").some((v) => v.trim() === "origin")) {
+      headers.set("Vary", `${vary}, Origin`);
+    }
+    headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    headers.set(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PATCH, PUT, DELETE, OPTIONS",
+    );
+    headers.set("Access-Control-Max-Age", "86400");
+  }
+
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -121,8 +147,25 @@ export async function readJson<T>(request: Request): Promise<T> {
     );
   }
 
+  // Reject oversized bodies before they are parsed. Every field in this API is
+  // far below the limit, so a large body is never legitimate.
+  const declaredLength = Number(request.headers.get("Content-Length") ?? "0");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+    throw new HttpError(413, "payload_too_large", "The request body is too large.");
+  }
+
+  let text: string;
   try {
-    return (await request.json()) as T;
+    text = await request.text();
+  } catch {
+    throw new HttpError(400, "invalid_json", "The request body is not valid JSON.");
+  }
+  if (text.length > MAX_BODY_BYTES) {
+    throw new HttpError(413, "payload_too_large", "The request body is too large.");
+  }
+
+  try {
+    return JSON.parse(text) as T;
   } catch {
     throw new HttpError(400, "invalid_json", "The request body is not valid JSON.");
   }

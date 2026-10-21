@@ -54,11 +54,19 @@ async function ensureUser(user) {
       body: { ...user, password: DEMO_PASSWORD },
     });
   } catch (error) {
-    if (error.status !== 409) throw error;
-    return request("/auth/signin", {
-      method: "POST",
-      body: { email: user.email, password: DEMO_PASSWORD },
-    });
+    if (error.status === 409) {
+      return request("/auth/signin", {
+        method: "POST",
+        body: { email: user.email, password: DEMO_PASSWORD },
+      });
+    }
+    if (error.status === 429) {
+      throw new Error(
+        `The server is rate limiting registrations from this address (429). ` +
+          `Wait a little and run the seed again.`,
+      );
+    }
+    throw error;
   }
 }
 

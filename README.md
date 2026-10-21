@@ -50,7 +50,9 @@ longer imports the PocketBase SDK or SSE polyfill.
 
 Planning Center OAuth linking is deferred until client credentials and a registered
 callback are available. The migration design, schema, routes, and protocol live in
-[`docs/cloudflare-migration.md`](docs/cloudflare-migration.md).
+[`docs/cloudflare-migration.md`](docs/cloudflare-migration.md). The security
+review of both the Worker and the client, including the findings that are still
+open, lives in [`docs/security-review.md`](docs/security-review.md).
 
 ---
 

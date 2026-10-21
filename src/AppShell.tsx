@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   describeError,
+  onUnauthorized,
   parsePocketBaseDate,
   POCKETBASE_URL,
   restoreSession,
@@ -29,6 +30,7 @@ import { REACTION_EMOJIS } from "./constants";
 import { useMessageSearch } from "./hooks/useMessageSearch";
 import { usePreferences } from "./hooks/usePreferences";
 import { useWorkspace } from "./hooks/useWorkspace";
+import { clearPreferencesForUser } from "./storage/preferencesStore";
 import {
   firstNames,
   readCoversMessage,
@@ -152,6 +154,21 @@ export function AppShell() {
     setEditingId(null);
     setSheet(null);
   }, [selectedId]);
+
+  useEffect(
+    () =>
+      onUnauthorized(() => {
+        // The server rejected the session. Leaving the signed-in state keeps
+        // the app from showing a workspace that no longer works.
+        setSession(null);
+        setSelectedId(null);
+        setDetailsId(null);
+        setComposing(false);
+        setSheet(null);
+        setAuthError("Your session expired. Please sign in again.");
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (Platform.OS !== "android") return undefined;
@@ -368,7 +385,13 @@ export function AppShell() {
 
   async function handleSignOut() {
     workspace.stopTyping();
+    const signedOutUserId = session?.user.id;
     await signOut();
+    if (signedOutUserId) {
+      // Read positions and mute lists stay on the device. They are personal
+      // data of the user who just left, so they are removed as well.
+      await clearPreferencesForUser(signedOutUserId).catch(() => undefined);
+    }
     setSession(null);
     setSelectedId(null);
     setDetailsId(null);

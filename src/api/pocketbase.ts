@@ -81,15 +81,54 @@ const configuredUrl =
   process.env.EXPO_PUBLIC_API_URL?.trim() ||
   process.env.EXPO_PUBLIC_POCKETBASE_URL?.trim();
 
-export const API_URL = normalizeBaseUrl(
-  configuredUrl || developmentApiUrl() || DEFAULT_URL,
-);
+/**
+ * The API origin is public build configuration, but the session token that the
+ * app stores is a long-lived credential. It must never be sent to a host that
+ * did not issue it, so the origin is validated and the stored token is bound
+ * to it.
+ *
+ * A misconfigured build does not crash the app here. The problem is reported
+ * on the first request instead, so the user sees a message instead of a blank
+ * screen.
+ */
+let apiUrlError: string | null = null;
+
+function resolveApiUrl(): string {
+  const raw = configuredUrl || developmentApiUrl() || DEFAULT_URL;
+
+  let url: URL;
+  try {
+    url = new URL(normalizeBaseUrl(raw));
+  } catch {
+    apiUrlError = "The API URL is not a valid address.";
+    return normalizeBaseUrl(raw);
+  }
+
+  if (url.username || url.password) {
+    apiUrlError = "The API URL must not contain credentials.";
+  } else if (url.protocol !== "https:" && !__DEV__) {
+    // Release builds talk to the API over TLS only. Local development is
+    // allowed to use plain HTTP on loopback and LAN addresses.
+    apiUrlError = "The API URL must use https outside development builds.";
+  }
+
+  return normalizeBaseUrl(raw);
+}
+
+export const API_URL = resolveApiUrl();
 
 /**
  * Compatibility alias. The app used to point this at PocketBase; screens still
  * display the resolved server URL under this name.
  */
 export const POCKETBASE_URL = API_URL;
+
+/** WebSocket origin derived from the validated API URL. */
+export const REALTIME_URL = (() => {
+  const url = new URL(API_URL);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString().replace(/\/+$/, "");
+})();
 
 const authStorage = {
   getItem: (key: string) =>
@@ -113,6 +152,8 @@ export type SessionUser = {
 };
 
 type StoredAuth = {
+  /** API origin that issued the token. A token is never sent elsewhere. */
+  origin: string;
   token: string;
   user: SessionUser;
 };
@@ -134,6 +175,30 @@ let authUser: SessionUser | null = null;
 let hydratePromise: Promise<void> | null = null;
 let hydrated = false;
 
+/**
+ * The server rejected the session. The UI has to leave the signed-in state,
+ * otherwise the app keeps showing a workspace that no longer works.
+ */
+type UnauthorizedListener = () => void;
+const unauthorizedListeners = new Set<UnauthorizedListener>();
+
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener);
+  return () => {
+    unauthorizedListeners.delete(listener);
+  };
+}
+
+function notifyUnauthorized(): void {
+  for (const listener of unauthorizedListeners) {
+    try {
+      listener();
+    } catch {
+      // A failing listener must not break the request that reported the error.
+    }
+  }
+}
+
 async function hydrateAuth(): Promise<void> {
   if (hydrated) return;
   if (!hydratePromise) {
@@ -149,6 +214,13 @@ async function hydrateAuth(): Promise<void> {
           typeof parsed.user.name === "string" &&
           typeof parsed.user.email === "string"
         ) {
+          // A token issued by a different API origin is never reused. Without
+          // this check, pointing the build at another host would hand that host
+          // the stored credential.
+          if (parsed.origin && parsed.origin !== API_URL) {
+            await authStorage.removeItem(AUTH_KEY).catch(() => undefined);
+            return;
+          }
           authToken = parsed.token;
           authUser = parsed.user;
         }
@@ -167,7 +239,7 @@ async function saveAuth(token: string, user: SessionUser): Promise<void> {
   authUser = user;
   hydrated = true;
   await authStorage
-    .setItem(AUTH_KEY, JSON.stringify({ token, user }))
+    .setItem(AUTH_KEY, JSON.stringify({ origin: API_URL, token, user }))
     .catch(() => undefined);
 }
 
@@ -175,10 +247,16 @@ async function clearAuth(): Promise<void> {
   authToken = null;
   authUser = null;
   hydrated = true;
-  await authStorage.removeItem(AUTH_KEY).catch(() => undefined);
+  // A failed removal would leave the credential on disk, so the failure is
+  // reported instead of being swallowed.
+  await authStorage.removeItem(AUTH_KEY);
 }
 
 type ApiOptions = RequestInit & { auth?: boolean };
+
+/** Every response this API produces is far below these limits. */
+const REQUEST_TIMEOUT_MS = 20_000;
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 type ErrorBody = {
   error?: { code?: string; message?: string };
@@ -189,6 +267,11 @@ async function apiFetch<T>(
   path: string,
   options: ApiOptions = {},
 ): Promise<T> {
+  if (apiUrlError) {
+    // Refuse to send the session token to an unverified destination.
+    throw new ApiError(0, "invalid_api_url", apiUrlError);
+  }
+
   await hydrateAuth();
 
   const { auth = true, ...init } = options;
@@ -202,17 +285,39 @@ async function apiFetch<T>(
   }
 
   let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    response = await fetch(`${API_URL}${path}`, { ...init, headers });
-  } catch {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new ApiError(
+        0,
+        "timeout",
+        "The server took too long to answer. Please try again.",
+      );
+    }
     throw new ApiError(
       0,
       "network_error",
       `Can't reach the Open Services server at ${API_URL}.`,
     );
+  } finally {
+    clearTimeout(timeout);
   }
 
   const text = await response.text();
+  if (text.length > MAX_RESPONSE_BYTES) {
+    throw new ApiError(
+      0,
+      "response_too_large",
+      "The server sent an unexpectedly large response.",
+    );
+  }
   let parsed: unknown = null;
   if (text) {
     try {
@@ -235,6 +340,7 @@ async function apiFetch<T>(
     if (response.status === 401 && auth) {
       realtime.close();
       void clearAuth();
+      notifyUnauthorized();
     }
     throw new ApiError(response.status, code, message);
   }
@@ -330,6 +436,32 @@ type ServerEvent =
 
 type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
+const MAX_REALTIME_FRAME_BYTES = 512 * 1024;
+
+const SERVER_EVENT_TYPES = new Set([
+  "ready",
+  "pong",
+  "message.created",
+  "message.updated",
+  "message.deleted",
+  "conversation.created",
+  "conversation.updated",
+  "conversation.deleted",
+  "reaction.added",
+  "reaction.removed",
+  "read.updated",
+  "typing.updated",
+  "typing.stopped",
+  "error",
+]);
+
+/** Frames that are not a known event are dropped instead of dispatched. */
+function isServerEvent(value: unknown): value is ServerEvent {
+  if (!value || typeof value !== "object") return false;
+  const type = (value as { type?: unknown }).type;
+  return typeof type === "string" && SERVER_EVENT_TYPES.has(type);
+}
+
 type RealtimeListener = (event: ServerEvent) => void;
 type StatusListener = (status: RealtimeStatus) => void;
 
@@ -363,7 +495,7 @@ class RealtimeClient {
         { method: "POST" },
       );
 
-      const websocketUrl = `${API_URL.replace(/^http/i, "ws")}/api/realtime?ticket=${encodeURIComponent(ticket)}`;
+      const websocketUrl = `${REALTIME_URL}/api/realtime?ticket=${encodeURIComponent(ticket)}`;
       const socket = new WebSocket(websocketUrl);
       this.socket = socket;
 
@@ -380,17 +512,27 @@ class RealtimeClient {
 
       socket.onmessage = (event) => {
         if (typeof event.data !== "string") return;
-        let parsed: ServerEvent;
+        if (event.data.length > MAX_REALTIME_FRAME_BYTES) return;
+        let parsed: unknown;
         try {
-          parsed = JSON.parse(event.data) as ServerEvent;
+          parsed = JSON.parse(event.data);
         } catch {
           return;
         }
+        // A frame without a known type is ignored instead of being dispatched
+        // into the state handlers.
+        if (!isServerEvent(parsed)) return;
 
         if (parsed.type === "ready") {
           this.setStatus("connected");
         } else if (parsed.type !== "pong") {
-          for (const listener of this.listeners) listener(parsed);
+          for (const listener of this.listeners) {
+            try {
+              listener(parsed);
+            } catch {
+              // One failing handler must not stop the other subscribers.
+            }
+          }
         }
       };
 
@@ -667,23 +809,31 @@ export async function restoreSession(): Promise<SessionUser | null> {
   if (!authToken) return null;
 
   try {
-    const data = await apiFetch<{ user: ApiUser }>("/api/auth/session");
+    // Rotating the token on every start keeps a stolen token from staying
+    // valid for the full session lifetime.
+    const data = await apiFetch<{ token: string; user: ApiUser }>(
+      "/api/auth/refresh",
+      { method: "POST" },
+    );
     const user: SessionUser = {
       id: data.user.id,
       name: data.user.name,
       email: data.user.email,
     };
-    await saveAuth(authToken, user);
+    await saveAuth(data.token, user);
     return user;
   } catch (error) {
     if (error instanceof ApiError) {
       if (error.status === 0 || error.status >= 500) {
+        // The server could not be reached or failed. Keep the cached identity
+        // so the app can start offline instead of dropping the user.
         return authUser;
       }
       await clearAuth();
       return null;
     }
-    return authUser;
+    // An unexpected failure must not be turned into a signed-in state.
+    return null;
   }
 }
 
@@ -744,7 +894,12 @@ export async function signOut(): Promise<void> {
     // Local sign-out must succeed even if the server is unreachable.
   }
   realtime.close();
-  await clearAuth();
+  try {
+    await clearAuth();
+  } catch {
+    // The server side session is already revoked, so a token that could not
+    // be removed from the device is worthless. The sign-out still stands.
+  }
 }
 
 export async function fetchConversations(

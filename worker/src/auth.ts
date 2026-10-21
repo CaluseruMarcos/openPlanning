@@ -70,19 +70,28 @@ function sessionTtlMs(env: Env): number {
   return days * 24 * 60 * 60 * 1000;
 }
 
+/**
+ * Secrets never fall back to a built-in constant: a known default would let
+ * anyone forge session hashes and realtime tickets. Anything other than an
+ * explicit development environment fails closed.
+ */
 function secretValue(env: Env, kind: "session" | "ticket"): string {
   const value = kind === "session" ? env.SESSION_SECRET : env.TICKET_SECRET;
-  if (value && value.length >= 16) return value;
+  if (value && value.length >= 32) return value;
 
-  if (env.ENVIRONMENT === "production") {
+  const name = kind === "session" ? "SESSION_SECRET" : "TICKET_SECRET";
+  if (env.ENVIRONMENT !== "development") {
     throw new HttpError(
       500,
       "server_misconfigured",
-      `${kind === "session" ? "SESSION_SECRET" : "TICKET_SECRET"} is not configured.`,
+      `${name} is not configured.`,
     );
   }
-
-  return `development-${kind}-secret-not-for-production`;
+  throw new HttpError(
+    500,
+    "server_misconfigured",
+    `${name} must be set to at least 32 characters.`,
+  );
 }
 
 async function pbkdf2(
@@ -307,18 +316,21 @@ export async function authenticate(
 
 export type RealtimeTicket = {
   userId: string;
+  sessionId: string;
   expiresAt: string;
 };
 
 export async function createRealtimeTicket(
   env: Env,
   userId: string,
+  sessionId: string,
 ): Promise<{ ticket: string; expiresAt: string }> {
   const expiresAt = new Date(Date.now() + 60_000).toISOString();
   const payload = bytesToBase64Url(
     encoder.encode(
       JSON.stringify({
         userId,
+        sessionId,
         exp: Date.parse(expiresAt),
         nonce: bytesToBase64Url(crypto.getRandomValues(new Uint8Array(12))),
       }),
@@ -339,16 +351,25 @@ export async function verifyRealtimeTicket(
     throw new HttpError(401, "invalid_ticket", "The realtime ticket is invalid.");
   }
 
+  // A malformed ticket must never surface as a server error: an unauthenticated
+  // caller could otherwise turn the endpoint into a log-flooding source.
+  let actual: Uint8Array;
+  try {
+    actual = base64UrlToBytes(signature);
+  } catch {
+    throw new HttpError(401, "invalid_ticket", "The realtime ticket is invalid.");
+  }
+
   const expected = await hmacSha256(secretValue(env, "ticket"), payload);
-  const actual = base64UrlToBytes(signature);
   if (!constantTimeEqual(expected, actual)) {
     throw new HttpError(401, "invalid_ticket", "The realtime ticket is invalid.");
   }
 
-  let parsed: { userId?: unknown; exp?: unknown };
+  let parsed: { userId?: unknown; sessionId?: unknown; exp?: unknown };
   try {
     parsed = JSON.parse(decoder.decode(base64UrlToBytes(payload))) as {
       userId?: unknown;
+      sessionId?: unknown;
       exp?: unknown;
     };
   } catch {
@@ -365,8 +386,28 @@ export async function verifyRealtimeTicket(
 
   return {
     userId: parsed.userId,
+    sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : "",
     expiresAt: new Date(parsed.exp).toISOString(),
   };
+}
+
+/**
+ * A ticket is only usable while its session is still alive. Signing out or
+ * expiring the session therefore invalidates tickets that were handed out
+ * earlier.
+ */
+export async function isSessionActive(
+  env: Env,
+  sessionId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!sessionId) return false;
+  const row = await env.DB.prepare(
+    "SELECT id FROM sessions WHERE id = ? AND user_id = ? AND expires_at > ?",
+  )
+    .bind(sessionId, userId, nowIso())
+    .first<{ id: string }>();
+  return row !== null;
 }
 
 export async function cleanupExpiredSessions(env: Env): Promise<void> {

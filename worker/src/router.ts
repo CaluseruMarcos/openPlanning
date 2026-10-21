@@ -7,6 +7,7 @@ import {
   findUserById,
   hashPassword,
   isEmail,
+  isSessionActive,
   newId,
   normalizeEmail,
   nowIso,
@@ -42,20 +43,25 @@ import {
   stringField,
 } from "./http";
 import { publishToUsers } from "./realtime";
+import { clientIp, throttle } from "./throttle";
 import type { AuthContext, Env } from "./types";
 
 const MAX_PAGE_SIZE = 100;
 
 function pageLimit(url: URL, fallback = 50): number {
-  const raw = Number(url.searchParams.get("limit"));
-  if (!Number.isFinite(raw)) return fallback;
-  return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(raw)));
+  const raw = url.searchParams.get("limit");
+  if (raw === null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(parsed)));
 }
 
 function pageOffset(url: URL): number {
-  const raw = Number(url.searchParams.get("offset"));
-  if (!Number.isFinite(raw)) return 0;
-  return Math.max(0, Math.floor(raw));
+  const raw = url.searchParams.get("offset");
+  if (raw === null || raw.trim() === "") return 0;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.floor(parsed));
 }
 
 function decodePathId(value: string): string {
@@ -68,6 +74,41 @@ function decodePathId(value: string): string {
 
 function isUniqueConstraint(error: unknown): boolean {
   return /unique constraint/i.test(String(error));
+}
+
+function rateLimited(retryAfterSeconds: number): Response {
+  return jsonResponse(
+    {
+      error: {
+        code: "rate_limited",
+        message: "Too many attempts. Please wait a moment and try again.",
+      },
+    },
+    429,
+    { "Retry-After": String(retryAfterSeconds) },
+  );
+}
+
+/** Reads the submitted email without consuming the request body. */
+async function accountKey(request: Request): Promise<string> {
+  try {
+    const body = (await request.clone().json()) as { email?: unknown };
+    return typeof body.email === "string"
+      ? body.email.trim().toLowerCase()
+      : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * A reaction must look like a reaction. Arbitrary strings are stored and
+ * broadcast to every member of a conversation, so they are rejected here
+ * instead of relying on the client to send a fixed list.
+ */
+function isEmoji(value: string): boolean {
+  if (/[\p{Cc}]/u.test(value)) return false;
+  return /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(value);
 }
 
 function parseParticipantIds(value: unknown): string[] {
@@ -108,6 +149,10 @@ async function signup(request: Request, env: Env): Promise<Response> {
     throw new HttpError(400, "invalid_email", "Enter a valid email address.");
   }
 
+  // Derive the password before looking the account up: an existing email must
+  // not answer faster than an unknown one.
+  const passwordHash = await hashPassword(password, env);
+
   if (await findUserByEmail(env, email)) {
     throw new HttpError(
       409,
@@ -124,7 +169,7 @@ async function signup(request: Request, env: Env): Promise<Response> {
         (id, email, name, password_hash, email_verified_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, NULL, ?, ?)`,
     )
-      .bind(userId, email, name, await hashPassword(password, env), now, now)
+      .bind(userId, email, name, passwordHash, now, now)
       .run();
   } catch (error) {
     if (isUniqueConstraint(error)) {
@@ -375,22 +420,25 @@ async function createMessage(
 
   const messageId = newId();
   const now = nowIso();
-  await env.DB.prepare(
-    `INSERT INTO messages
-      (id, conversation_id, author_id, body, reply_to_id, edited_at, created_at)
-     VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-  )
-    .bind(
-      messageId,
-      conversationId,
-      auth.user.id,
-      messageBody,
-      replyToId,
-      now,
-    )
-    .run();
-
-  await refreshConversationSummary(env, conversationId);
+  // The message and the conversation summary are written together, so the list
+  // never shows a stale preview for a message that exists.
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO messages
+        (id, conversation_id, author_id, body, reply_to_id, edited_at, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+    ).bind(messageId, conversationId, auth.user.id, messageBody, replyToId, now),
+    env.DB.prepare(
+      `UPDATE conversations
+       SET last_message_id = ?,
+           last_message_preview = ?,
+           last_message_at = ?,
+           last_message_author_id = ?,
+           updated_at = ?
+       WHERE id = ?
+         AND (last_message_at IS NULL OR last_message_at <= ?)`,
+    ).bind(messageId, messageBody, now, auth.user.id, now, conversationId, now),
+  ]);
 
   const row = await getMessageById(env, messageId);
   if (!row) {
@@ -510,6 +558,9 @@ async function addReaction(
 
   const body = await readJson<Record<string, unknown>>(request);
   const emoji = stringField(body, "emoji", { min: 1, max: 16 });
+  if (!isEmoji(emoji)) {
+    throw new HttpError(400, "invalid_emoji", "Pick a single reaction emoji.");
+  }
   const reactionId = newId();
   const now = nowIso();
 
@@ -697,6 +748,11 @@ async function realtime(
   if (!(await findUserById(env, verified.userId))) {
     throw new HttpError(401, "invalid_ticket", "Reconnect to continue.");
   }
+  // A ticket dies with its session: signing out invalidates outstanding
+  // tickets instead of leaving a 60 second window open.
+  if (!(await isSessionActive(env, verified.sessionId, verified.userId))) {
+    throw new HttpError(401, "expired_ticket", "Reconnect to continue.");
+  }
 
   const headers = new Headers(request.headers);
   headers.set("X-User-Id", verified.userId);
@@ -714,7 +770,12 @@ export async function handleApiRequest(
   env: Env,
 ): Promise<Response> {
   const url = new URL(request.url);
-  const path = url.pathname.replace(/^\/api/, "") || "/";
+  // The API is only served under /api. Serving it at the root as well would
+  // duplicate the attack surface and defeat path based rules.
+  if (!url.pathname.startsWith("/api/")) {
+    throw new HttpError(404, "not_found", "That endpoint does not exist.");
+  }
+  const path = url.pathname.slice("/api".length) || "/";
   const method = request.method.toUpperCase();
 
   if (path === "/health" && method === "GET") {
@@ -722,9 +783,37 @@ export async function handleApiRequest(
   }
 
   if (path === "/auth/signup" && method === "POST") {
+    if (env.ALLOW_SIGNUP === "false") {
+      throw new HttpError(
+        403,
+        "signup_disabled",
+        "Registration is closed on this deployment.",
+      );
+    }
+    const perIp = throttle(
+      `signup:${clientIp(request)}`,
+      20,
+      60 * 60 * 1000,
+    );
+    if (!perIp.allowed) {
+      return rateLimited(perIp.retryAfterSeconds);
+    }
     return signup(request, env);
   }
   if (path === "/auth/signin" && method === "POST") {
+    const ip = clientIp(request);
+    const perAccount = throttle(
+      `signin:${ip}:${await accountKey(request)}`,
+      10,
+      10 * 60 * 1000,
+    );
+    if (!perAccount.allowed) {
+      return rateLimited(perAccount.retryAfterSeconds);
+    }
+    const perIp = throttle(`signin:${ip}`, 50, 10 * 60 * 1000);
+    if (!perIp.allowed) {
+      return rateLimited(perIp.retryAfterSeconds);
+    }
     return signin(request, env);
   }
   if (path === "/realtime" && method === "GET") {
@@ -750,7 +839,9 @@ export async function handleApiRequest(
     return jsonResponse({ token, user: auth.user });
   }
   if (path === "/realtime/ticket" && method === "POST") {
-    return jsonResponse(await createRealtimeTicket(env, auth.user.id));
+    return jsonResponse(
+      await createRealtimeTicket(env, auth.user.id, auth.session.id),
+    );
   }
 
   if (path === "/people" && method === "GET") {
@@ -758,8 +849,10 @@ export async function handleApiRequest(
   }
 
   if (path === "/search/messages" && method === "GET") {
-    const needle = (url.searchParams.get("q") ?? "").trim();
-    if (needle.length < 2) return jsonResponse([]);
+    const raw = (url.searchParams.get("q") ?? "").trim();
+    if (raw.length < 2) return jsonResponse([]);
+    // The search is a scan; a bounded needle keeps the work predictable.
+    const needle = raw.slice(0, 64);
     return jsonResponse(
       await searchConversationIds(env, auth.user.id, needle),
     );
