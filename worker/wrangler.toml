@@ -4,15 +4,18 @@ compatibility_date = "2026-10-01"
 workers_dev = true
 
 [vars]
-ENVIRONMENT = "development"
+ENVIRONMENT = "production"
 SESSION_TTL_DAYS = "30"
 PBKDF2_ITERATIONS = "100000"
-APP_ORIGIN = "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006"
+# Allowed browser origins for the API. Narrow this to the deployed Pages
+# origin (for example "https://open-services.pages.dev") once the web build
+# lives on Cloudflare Pages. "*" keeps native builds and any web host working.
+APP_ORIGIN = "*"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "open-services"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "806dc9ab-457f-4f6e-b58b-5673ade639a0"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
@@ -22,10 +25,6 @@ class_name = "UserHub"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["UserHub"]
-
-[[r2_buckets]]
-binding = "FILES"
-bucket_name = "open-services-files"
 
 [triggers]
 crons = ["17 * * * *"]

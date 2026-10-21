@@ -33,9 +33,18 @@ D1 stores durable data; one UserHub Durable Object per signed-in user carries
 WebSocket events. Native tokens are stored in SecureStore and the web build uses
 localStorage-backed storage.
 
-Email/password auth and session restore are implemented. The Worker still needs a
-real Cloudflare D1 database, secrets, and a deployment before it can be used
-outside local development. The original **PocketBase** backend remains under
+Email/password auth and session restore are implemented, and the Worker is
+**deployed and running** at
+
+```
+https://open-services-api.snorlaxking310.workers.dev
+```
+
+Point the app at it with `EXPO_PUBLIC_API_URL=https://open-services-api.snorlaxking310.workers.dev`.
+Setup, redeploy steps, and the seeded demo accounts are documented in
+[`worker/README.md`](worker/README.md).
+
+The original **PocketBase** backend remains under
 [`backend/`](backend/README.md) as a reference and rollback path; the client no
 longer imports the PocketBase SDK or SSE polyfill.
 

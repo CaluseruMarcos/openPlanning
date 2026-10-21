@@ -29,3 +29,6 @@ analysis/
 
 # Backups and archives
 backup_artifacts_*.tar.gz
+
+# Local production secrets (not committed)
+.secrets.local

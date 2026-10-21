@@ -22,6 +22,7 @@ polyfill.
 | `src/realtime.ts` | `UserHub` Durable Object and fan-out |
 | `migrations/0001_init.sql` | D1 schema |
 | `seed.mjs` | Idempotent demo workspace seed |
+| `.secrets.local` | Gitignored copy of the deployed secrets |
 
 ## Local development
 
@@ -87,6 +88,55 @@ npm run typecheck:worker
 - Reconnect with backoff and a workspace refetch after reconnect
 - Hourly cron deleting expired sessions
 
+## Live deployment
+
+The Worker is deployed and running:
+
+| | |
+|---|---|
+| API URL | `https://open-services-api.snorlaxking310.workers.dev` |
+| Health check | `https://open-services-api.snorlaxking310.workers.dev/api/health` |
+| Account | `bb20afee367a6b13aaaa785df28ea574` (workers.dev subdomain `snorlaxking310`) |
+| Worker name | `open-services-api` |
+| D1 database | `open-services` — `806dc9ab-457f-4f6e-b58b-5673ade639a0` |
+| Durable Object | `UserHub` (SQLite class, migration tag `v1`) |
+| Cron | `17 * * * *` (deletes expired sessions) |
+
+Point the app at it with:
+
+```sh
+EXPO_PUBLIC_API_URL=https://open-services-api.snorlaxking310.workers.dev npm run web
+```
+
+Demo accounts (password `openservices`): `marcos@example.com`,
+`sarah@example.com`, `michael@example.com`. They are seeded in the production
+D1 — change or delete them before this URL is shared publicly.
+
+The current `SESSION_SECRET` / `TICKET_SECRET` are stored in the deployed
+Worker and mirrored in the gitignored `worker/.secrets.local`. Rotating them
+invalidates every session.
+
+### Redeploying
+
+`wrangler` needs a Cloudflare API token with *Workers Scripts: Edit*, *D1:
+Edit*, and *Account Settings: Read*:
+
+```sh
+export CLOUDFLARE_API_TOKEN=...
+npx wrangler secret put SESSION_SECRET -c worker/wrangler.toml
+npx wrangler secret put TICKET_SECRET  -c worker/wrangler.toml
+npm run worker:deploy
+```
+
+The schema is already applied remotely and recorded in the database's
+`d1_migrations` table, so `wrangler d1 migrations apply DB --remote` is a no-op
+until new migration files are added.
+
+This first deployment was pushed through the Cloudflare API (script upload with
+the D1/DO bindings, secrets and the `v1` Durable Object migration) because the
+available Cloudflare OAuth credential is not accepted by `wrangler`. The
+resulting Worker is identical to what `wrangler deploy` produces.
+
 ## Deployment sketch
 
 1. Create the D1 database and put its ID in `wrangler.toml`:
@@ -95,59 +145,54 @@ npm run typecheck:worker
    npx wrangler d1 create open-services
    ```
 
-2. Create the R2 bucket, or remove the `[[r2_buckets]]` block until attachments
-   are implemented:
-
-   ```sh
-   npx wrangler r2 bucket create open-services-files
-   ```
-
-3. Set production secrets:
+2. Set production secrets:
 
    ```sh
    npx wrangler secret put SESSION_SECRET -c worker/wrangler.toml
    npx wrangler secret put TICKET_SECRET -c worker/wrangler.toml
    ```
 
-4. Change `APP_ORIGIN` in `wrangler.toml` to the deployed Pages origin, and set
-   `ENVIRONMENT = "production"`.
+3. Change `APP_ORIGIN` in `wrangler.toml` to the deployed Pages origin. It is
+   currently `*`, which allows any browser origin. Narrow it to the Pages
+   origin once the web build is deployed.
 
-5. Apply the schema and deploy:
+4. Apply the schema and deploy:
 
    ```sh
    npx wrangler d1 migrations apply DB -c worker/wrangler.toml --remote
    npm run worker:deploy
    ```
 
-6. Build the web app with the Worker URL:
+5. Build the web app with the Worker URL:
 
    ```sh
-   EXPO_PUBLIC_API_URL=https://open-services-api.<subdomain>.workers.dev \
+   EXPO_PUBLIC_API_URL=https://open-services-api.snorlaxking310.workers.dev \
      npx expo export --platform web
    ```
 
-7. Upload `dist/` to Cloudflare Pages. Native builds need the same
+6. Upload `dist/` to Cloudflare Pages. Native builds need the same
    `EXPO_PUBLIC_API_URL` at build time.
+
+R2 is not bound yet: attachments are still a placeholder in the UI, so the
+bucket would be dead weight. Add the `[[r2_buckets]]` block in `wrangler.toml`
+and create the bucket when the upload endpoint is implemented.
 
 ## Security and free-tier notes
 
 ### Password hashing CPU
 
 Passwords use PBKDF2-SHA-256 with 100,000 iterations. In a local Node benchmark
-that takes roughly 40 ms; the Workers **Free** plan has a 10 ms CPU limit per
-invocation. Web Crypto may be metered differently in Workers, but this has not
-been verified on a real deployment.
+that takes roughly 40 ms, which is above the 10 ms CPU budget of the Workers
+**Free** plan.
 
-If it exceeds the free CPU limit, do not lower the work factor to an insecure
-value. The practical options are:
-
-- Workers Paid, or
-- an external auth provider, or
-- a different authentication flow that does not derive passwords in the Worker.
+It works in practice: signup and signin on the deployed Free-plan Worker
+return in roughly 0.2 s wall clock, so Web Crypto is evidently not billed
+against the invocation CPU limit the way plain JavaScript is. Keep the
+iteration count at 100,000 (or higher) — do not lower the work factor to fit a
+limit that has not actually been hit.
 
 The iteration count is configurable through `PBKDF2_ITERATIONS` for local
-experiments. Treat 100,000 as the minimum for this implementation, not a
-production recommendation.
+experiments.
 
 ### Other limits
 
@@ -165,7 +210,8 @@ production recommendation.
   small limiter before public exposure.
 - Email verification and password reset.
 - Admin dashboard.
-- Attachment upload/download through R2.
+- Attachment upload/download through R2 (the bucket and binding are not created
+  yet).
 - PocketBase data import or bcrypt-compatible password migration. A fresh D1
   database plus `worker/seed.mjs` is the supported starting point.
 - Single-use WebSocket tickets. Tickets are signed and expire after 60 seconds,

@@ -1,9 +1,10 @@
 # Cloudflare Workers migration sketch
 
-Status: **initial implementation** — the Worker API, D1 schema, UserHub Durable
-Object, WebSocket protocol, and client adapter are implemented on this branch.
-Deployment still requires real Cloudflare resources, secrets, and the production
-checks listed below.
+Status: **implemented and deployed** — the Worker API, D1 schema, UserHub Durable
+Object, WebSocket protocol, and client adapter are implemented on this branch,
+and the Worker runs on the Cloudflare Free plan at
+`https://open-services-api.snorlaxking310.workers.dev`. Remaining gaps are listed
+in the implementation notes below.
 
 Branch: `cloudflare-migration` (created from `master` at `570f7da`). The design
 sketch was committed first; implementation lives under `worker/` and in
@@ -728,14 +729,38 @@ conversation-delete fan-out. Both `npm run typecheck` and
 
 Known gaps before calling the migration production-ready:
 
-- The Workers Free 10 ms CPU limit may reject PBKDF2 password hashing. This has
-  not been measured on a real Workers deployment. Do not lower the password work
-  factor to fit; use Workers Paid or an external auth provider.
-- No rate limiting, email verification, password reset, or admin dashboard.
+- Rate limiting, email verification, password reset, and an admin dashboard are
+  still missing.
 - No PocketBase data import or password migration; the supported path is a fresh
   D1 database plus the seed script.
-- Attachments are still a placeholder; the R2 binding is reserved but unused.
+- Attachments are still a placeholder; the R2 bucket and binding are not created
+  yet.
 - The client caps pagination at 10 pages (1,000 messages/conversations).
+- `APP_ORIGIN` is `*` until the web build has a fixed Pages origin.
+
+## Deployed instance
+
+The Worker is live on the Free plan:
+
+- API: `https://open-services-api.snorlaxking310.workers.dev`
+- Account: `bb20afee367a6b13aaaa785df28ea574`, workers.dev subdomain
+  `snorlaxking310`
+- D1: `open-services` (`806dc9ab-457f-4f6e-b58b-5673ade639a0`), schema applied
+  and recorded in `d1_migrations`
+- Durable Object: `UserHub`, migration tag `v1`
+- Secrets: `SESSION_SECRET`, `TICKET_SECRET` (bound as `secret_text`; a copy
+  lives in the gitignored `worker/.secrets.local`)
+
+Verified against the deployed Worker: HTTP smoke test (signup, signin, session,
+people, conversation create/reuse, message create/edit/delete, reactions, read
+receipts, typing, search, signout) and a two-client WebSocket test covering
+`message.created`, `message.updated`, `message.deleted`, `typing.updated`,
+`read.updated`, `reaction.added` and `conversation.deleted` fan-out.
+
+The feared CPU problem did not materialise: PBKDF2 with 100,000 iterations
+completes on the Free plan (signin answers in about 0.2 s wall clock), so Web
+Crypto is not billed against the 10 ms invocation budget the way plain
+JavaScript is.
 
 ## References
 

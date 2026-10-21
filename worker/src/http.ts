@@ -75,6 +75,7 @@ export function allowedOrigin(request: Request, env: Env): string | null {
   if (!origin) return null;
 
   const configured = configuredOrigins(env);
+  if (configured.includes("*")) return origin;
   if (configured.length > 0) {
     return configured.includes(origin) ? origin : null;
   }
