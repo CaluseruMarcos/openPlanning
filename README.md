@@ -134,6 +134,22 @@ the Android emulator the fallback is `http://10.0.2.2:8787`; for a physical devi
 use your computer's LAN address (and make sure both are on the same network).
 Release builds must set `EXPO_PUBLIC_API_URL` at build time.
 
+### One command against the deployed backend
+
+```bash
+npm run app
+```
+
+That checks the backend, prints the demo accounts, picks a free port and starts
+the app against the deployed Worker. Useful flags:
+
+```bash
+npm run app -- --port 8082     # a specific port
+npm run app -- --native        # dev server for a phone, press a / i
+npm run app -- --no-open       # do not open a browser
+EXPO_PUBLIC_API_URL=http://127.0.0.1:8788 npm run app   # a local worker
+```
+
 Type-check both the app and the Worker:
 
 ```bash

@@ -5,6 +5,8 @@
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
+    "app": "node scripts/start-app.mjs",
+    "app:native": "node scripts/start-app.mjs --native",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
