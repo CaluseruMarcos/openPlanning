@@ -42,6 +42,31 @@ const ADMIN_KEY =
   readKeyFrom(join(root, "worker", ".secrets.local")) ||
   readKeyFrom(join(root, "worker", ".dev.vars"));
 
+/**
+ * The deployed demo accounts have their own random password, listed in the
+ * gitignored worker/.demo-accounts. A local database always uses the default
+ * one. WORKER_DEMO_PASSWORD overrides everything.
+ */
+const IS_LOCAL = /^https?:\/\/(127\.0\.0\.1|localhost|10\.0\.2\.2|0\.0\.0\.0)/.test(
+  BASE_URL,
+);
+
+function passwordFor(email) {
+  if (process.env.WORKER_DEMO_PASSWORD) return process.env.WORKER_DEMO_PASSWORD;
+  if (IS_LOCAL) return DEMO_PASSWORD;
+  try {
+    const file = readFileSync(join(root, "worker", ".demo-accounts"), "utf8");
+    for (const line of file.split("\n")) {
+      if (line.startsWith("#")) continue;
+      const [account, password] = line.trim().split(/\s+/);
+      if (account === email && password) return password;
+    }
+  } catch {
+    // No file, so the default password is used.
+  }
+  return DEMO_PASSWORD;
+}
+
 async function request(path, { method = "GET", token, body, admin } = {}) {
   const response = await fetch(`${BASE_URL}${path}`, {
     method,
@@ -86,21 +111,35 @@ async function createInvite(email) {
 }
 
 async function ensureUser(user) {
+  const password = passwordFor(user.email);
   try {
     return await request("/auth/signup", {
       method: "POST",
       body: {
         ...user,
-        password: DEMO_PASSWORD,
+        password,
         inviteCode: await createInvite(user.email),
       },
     });
   } catch (error) {
     if (error.status === 409) {
-      return request("/auth/signin", {
-        method: "POST",
-        body: { email: user.email, password: DEMO_PASSWORD },
-      });
+      // The account exists. The password only matches on a local database
+      // that was seeded with the default one.
+      try {
+        return await request("/auth/signin", {
+          method: "POST",
+          body: { email: user.email, password },
+        });
+      } catch (signInError) {
+        if (signInError.status === 401) {
+          throw new Error(
+            `${user.email} already exists, but the password does not match. ` +
+              `Set WORKER_DEMO_PASSWORD to the current one, or delete the ` +
+              `account first.`,
+          );
+        }
+        throw signInError;
+      }
     }
     if (error.status === 429) {
       throw new Error(
@@ -182,8 +221,13 @@ async function main() {
   await request("/people", { token: michael.token });
 
   console.log("");
-  console.log("Demo accounts (password: " + DEMO_PASSWORD + ")");
+  console.log("Demo accounts ready:");
   for (const user of USERS) console.log(`  ${user.email}`);
+  console.log(
+    IS_LOCAL
+      ? `\nPassword of the local database: ${DEMO_PASSWORD}`
+      : "\nPassword of the deployment: see worker/.demo-accounts",
+  );
 }
 
 main().catch((error) => {

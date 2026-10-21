@@ -36,3 +36,6 @@ backup_artifacts_*.tar.gz
 # Agent tooling installed locally
 .agents/skills/
 opencode.json
+
+# Live credentials of the deployed demo accounts
+.demo-accounts

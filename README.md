@@ -111,8 +111,9 @@ In a second terminal, seed the demo workspace:
 npm run worker:seed
 ```
 
-Demo accounts (password `openservices`): `marcos@example.com`,
-`sarah@example.com`, `michael@example.com`.
+Demo accounts of the local database (password `openservices`):
+`marcos@example.com`, `sarah@example.com`, `michael@example.com`. The deployed
+Worker uses a different, unpublished password.
 
 Then start the app. During development the app auto-detects the Expo dev
 server's LAN host on port `8787`, so no URL is normally needed:

@@ -84,7 +84,7 @@ added, deeper fix open), **Open** (needs a decision or a bigger change),
 
 | # | Finding | Severity | Why it is open |
 |---|---|---|---|
-| 27 | The demo accounts exist in the production D1 with the password `openservices` behind a public `workers.dev` URL. | Critical | They are the documented demo data. Delete them or rotate the password before the URL is shared. The app no longer shows them outside development builds. |
+| 27 | The demo accounts exist in the production D1 behind a public `workers.dev` URL. | Critical | Resolved for now: their password was rotated to a random one that is not published in the repository, and every session was invalidated. The accounts still exist, so delete them if the URL is shared with people who should not see the workspace. |
 | 28 | `APP_ORIGIN` is `*`, so any website may call the API cross-origin. | Medium | The API authenticates with a bearer header and never sets `Access-Control-Allow-Credentials`, so a hostile page cannot act as a signed-in victim today. It becomes a full CSRF hole the moment a cookie is introduced. Narrow it to the Pages origin once the web build is deployed. |
 | 29 | The bearer token lives in `localStorage` in the web build. | High | The fix is an `HttpOnly` session cookie plus a CSRF strategy, which is a redesign of the auth flow. Native builds already use `SecureStore`. |
 | 30 | Any user can start a group conversation with any other user, without consent. | Medium | Needs invites with acceptance, a leave route and a block list. |

@@ -83,7 +83,7 @@ npm run worker:seed
 The seed asks the admin endpoint for an invite code per account, so it needs
 the same admin key.
 
-Demo accounts, password `openservices`:
+Demo accounts of the local database, password `openservices`:
 
 - `marcos@example.com`
 - `sarah@example.com`
@@ -143,9 +143,14 @@ Point the app at it with:
 EXPO_PUBLIC_API_URL=https://open-services-api.snorlaxking310.workers.dev npm run web
 ```
 
-Demo accounts (password `openservices`): `marcos@example.com`,
-`sarah@example.com`, `michael@example.com`. They are seeded in the production
-D1 — change or delete them before this URL is shared publicly.
+The demo accounts `marcos@example.com`, `sarah@example.com` and
+`michael@example.com` exist in the production D1. Their password is **not**
+published here: it is a random one and lives in the gitignored
+`worker/.demo-accounts`. The `openservices` password is only used by the seed
+script against a local database.
+
+Delete or rotate them if the URL is shared with people who should not see the
+workspace.
 
 The current `SESSION_SECRET` / `TICKET_SECRET` are stored in the deployed
 Worker and mirrored in the gitignored `worker/.secrets.local`. Rotating them
