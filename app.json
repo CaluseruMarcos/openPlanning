@@ -6,11 +6,19 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "scheme": "open-services",
+    "icon": "./assets/icon.png",
     "android": {
-      "package": "com.openservices.rebuild"
+      "package": "com.openservices.rebuild",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F7F7F9"
+      }
     },
     "ios": {
       "bundleIdentifier": "com.openservices.rebuild"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-secure-store"

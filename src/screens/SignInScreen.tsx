@@ -11,8 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Avatar } from "../components/Avatar";
-import { BRAND_PERSON } from "../constants";
+import { Logo } from "../components/Logo";
 import { styles } from "../styles";
 import type { AuthMode } from "../types";
 
@@ -70,7 +69,7 @@ export function SignInScreen({
         contentContainerStyle={styles.signInScrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <Avatar person={BRAND_PERSON} size={72} />
+        <Logo size={96} />
         <Text style={styles.signInTitle}>
           {mode === "signin" ? "Welcome back" : "Create your account"}
         </Text>

@@ -23,6 +23,7 @@ import {
 import { Avatar } from "./components/Avatar";
 import { BottomTabs } from "./components/BottomTabs";
 import { ErrorBanner } from "./components/Feedback";
+import { Logo } from "./components/Logo";
 import { Sheet, SheetRow } from "./components/Sheet";
 import { REACTION_EMOJIS } from "./constants";
 import { useMessageSearch } from "./hooks/useMessageSearch";
@@ -460,6 +461,7 @@ export function AppShell() {
       <View style={styles.app}>
         <StatusBar style="dark" />
         <View style={styles.centered}>
+          <Logo size={104} />
           <ActivityIndicator color="#5B61D6" size="large" />
           <Text style={styles.loadingText}>Starting Open Services…</Text>
         </View>
