@@ -180,10 +180,17 @@ resulting Worker is identical to what `wrangler deploy` produces.
 
 ## Deployment sketch
 
-1. Create the D1 database and put its ID in `wrangler.toml`:
+Everything below happens in **your own** Cloudflare account. The deployment
+described above belongs to the repository owner; a new deployment gets its own
+D1 database, its own secrets, its own `*.workers.dev` URL and its own quota.
+No Cloudflare account is needed for local development.
+
+1. Create the D1 database and put its ID in `wrangler.toml`. The file ships with
+   the placeholder `REPLACE_WITH_YOUR_D1_DATABASE_ID`:
 
    ```sh
    npx wrangler d1 create open-services
+   # copy the printed uuid into worker/wrangler.toml
    ```
 
 2. Set production secrets:
@@ -204,8 +211,7 @@ resulting Worker is identical to what `wrangler deploy` produces.
 4. Apply the schema and deploy:
 
    ```sh
-   npx wrangler d1 migrations apply DB -c worker/wrangler.toml --remote
-   npm run worker:deploy
+   npx wrangler d1 migrations apply DB -c worker/wrangler.toml --remote   npm run worker:deploy
    ```
 
 5. Build the web app with the Worker URL:

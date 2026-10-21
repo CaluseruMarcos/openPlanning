@@ -15,7 +15,11 @@ APP_ORIGIN = "*"
 [[d1_databases]]
 binding = "DB"
 database_name = "open-services"
-database_id = "806dc9ab-457f-4f6e-b58b-5673ade639a0"
+# Your own D1 database. Create one with
+#   npx wrangler d1 create open-services
+# and put the id it prints here. Locally this id only names the SQLite file
+# in worker/.wrangler, so any value works for development.
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
