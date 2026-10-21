@@ -39,6 +39,7 @@ inert:
 | Profile | Account name/email, stats, notification preference, About sheet, sign out |
 | Auth gate | Dedicated sign-in / create-account screen with validation and server errors |
 | Persistence | Session token (SecureStore/AsyncStorage) and local read, mute, and notification preferences survive reload; conversations and messages live in PocketBase |
+| Mobile networking | Backend listens on `0.0.0.0` by default, and the app derives the API host from the Expo dev server's LAN address, so physical phones no longer fall back to loopback/emulator URLs |
 | Safe area | `react-native-safe-area-context` (`SafeAreaProvider` + insets) for status bar, tab bar, composer, and sheets |
 | Web | Added `react-dom` and `react-native-web`; `npm run web` serves the app |
 
@@ -75,6 +76,12 @@ See `backend/README.md` for setup, reset, and production notes.
 - PocketBase API checks: seeded records, summary hook, per-viewer direct titles,
   user discovery, email privacy, and rejection of spoofed authors / non-participant
   reads and writes
+- Mobile networking checks: Expo manifest advertises the machine's LAN host
+  (`192.168.x.x:8081`), the app resolves `http://192.168.x.x:8090`, and the backend
+  answers `/api/health` on both loopback and the LAN address
+- Playwright run against the app served from the LAN address (not localhost):
+  sign-in screen shows the LAN API URL, login succeeds, and conversations/messages
+  load
 - Playwright (mobile viewport, separate browser contexts):
   - sign in, load seeded conversations, open a thread, send a message, reload and
     confirm session + message persistence
@@ -87,8 +94,8 @@ See `backend/README.md` for setup, reset, and production notes.
 - No console or page errors in the tested flows.
 
 **Not verified:** real Android/iOS hardware or emulator (none available), Expo Go
-launch, or the native SSE polyfill at runtime. Web and bundle-level verification
-only.
+launch, or the native SSE polyfill at runtime. The mobile networking fix was
+validated through the Expo manifest and a LAN-origin browser run, not on a phone.
 
 ## Remaining work
 

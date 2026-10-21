@@ -16,6 +16,10 @@ cd backend
 ./start.sh                 # http://127.0.0.1:8090  (dashboard at /_/)
 ```
 
+`start.sh` listens on `0.0.0.0:8090` by default so a physical phone on the same
+Wi-Fi can connect. Set `PB_HOST=127.0.0.1` to keep it loopback-only, or change
+`PB_PORT` if 8090 is taken.
+
 In a second terminal:
 
 ```sh
@@ -65,9 +69,12 @@ a client round trip. It also recomputes the summary when a message is deleted.
 
 ## App integration
 
-- The Expo app reads `EXPO_PUBLIC_POCKETBASE_URL` (see the root `.env.example`).
-  It defaults to `http://127.0.0.1:8090` on web/iOS and `http://10.0.2.2:8090`
-  on Android (emulator loopback).
+- The Expo app reads `EXPO_PUBLIC_POCKETBASE_URL` if set. Otherwise, in
+  development it derives the API host from the Expo dev server's LAN address
+  (`Constants.expoConfig.hostUri`), which makes physical phones work without
+  configuration. Platform fallbacks are `http://10.0.2.2:8090` on Android and
+  `http://127.0.0.1:8090` elsewhere. Release builds need an explicit URL at
+  build time.
 - Native auth tokens are stored in `expo-secure-store`; the web build uses
   AsyncStorage/localStorage. The session is refreshed on launch.
 - Conversations and messages are fetched from the REST API. Realtime updates use
@@ -78,6 +85,26 @@ a client round trip. It also recomputes the summary when a message is deleted.
   one per unread message.
 - Search queries PocketBase for matching message bodies (in addition to local
   title/participant/preview matching), so older messages are searchable.
+
+## Mobile connection troubleshooting
+
+Login fails on a phone when it cannot reach the backend:
+
+1. The sign-in screen shows `Server: …`. On a physical device it should show your
+   computer's LAN IP (for example `http://192.168.1.50:8090`), not `127.0.0.1`
+   or `10.0.2.2`.
+2. Make sure `./start.sh` is running with `PB_HOST=0.0.0.0` (the default) and
+   allow port 8090 through the firewall.
+3. Open `http://<computer-lan-ip>:8090/api/health` in the phone's browser. It
+   should return `{"message":"API is healthy.","code":200,...}`.
+4. Phone and computer must be on the same Wi-Fi. Guest networks and client
+   isolation can block LAN traffic. On iOS, allow Local Network access if prompted.
+5. If auto-detection picks the wrong interface (VPN, Docker, multiple NICs), set
+   `EXPO_PUBLIC_POCKETBASE_URL` explicitly and restart Expo with `--clear`.
+
+Expo Go and debug builds allow HTTP for local development. Release builds should
+use HTTPS; Android blocks cleartext HTTP and iOS ATS blocks non-local HTTP by
+default.
 
 ## Data and reset
 

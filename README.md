@@ -69,6 +69,9 @@ cd backend
 ./start.sh
 ```
 
+`start.sh` listens on `0.0.0.0:8090` by default so a phone on the same Wi-Fi can
+reach it. Set `PB_HOST=127.0.0.1` to restrict it to this machine.
+
 In a second terminal, seed the demo workspace:
 
 ```bash
@@ -81,15 +84,23 @@ Demo accounts (password `openservices`): `marcos@example.com`,
 `http://127.0.0.1:8090/_/` (`admin@openservices.local` / `devpassword` — dev only).
 See [`backend/README.md`](backend/README.md) for details and production notes.
 
-Then start the app with the backend URL (copy `.env.example` to `.env` if you
-prefer):
+Then start the app. During development the app auto-detects the Expo dev
+server's LAN host, so no URL is normally needed:
 
 ```bash
-EXPO_PUBLIC_POCKETBASE_URL=http://127.0.0.1:8090 npm run web
+npm run web     # or: npm start, then press i / a
 ```
 
-For the Android emulator use `http://10.0.2.2:8090`; for a physical device use
-your computer's LAN address.
+To override the API URL, set it explicitly (or copy `.env.example` to `.env`):
+
+```bash
+EXPO_PUBLIC_POCKETBASE_URL=http://192.168.1.50:8090 npm run web
+```
+
+The sign-in screen shows the URL the app resolved. For the Android emulator the
+fallback is `http://10.0.2.2:8090`; for a physical device use your computer's LAN
+address (and make sure both are on the same network). Release builds must set
+`EXPO_PUBLIC_POCKETBASE_URL` at build time.
 
 Type-check the source:
 

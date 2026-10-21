@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 import PocketBase, {
   BaseAuthStore,
@@ -11,13 +12,75 @@ import { Platform } from "react-native";
 import type { Conversation, Message, Person } from "../types";
 
 const AUTH_KEY = "open-services-auth";
+const API_PORT = 8090;
 
 const DEFAULT_URL =
-  Platform.OS === "android" ? "http://10.0.2.2:8090" : "http://127.0.0.1:8090";
+  Platform.OS === "android"
+    ? `http://10.0.2.2:${API_PORT}`
+    : `http://127.0.0.1:${API_PORT}`;
 
-export const POCKETBASE_URL = (
-  process.env.EXPO_PUBLIC_POCKETBASE_URL || DEFAULT_URL
-).replace(/\/+$/, "");
+function normalizeBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
+
+/**
+ * The Expo dev server tells us which host the bundle was loaded from. On a
+ * physical phone that is the development machine's LAN address, not loopback.
+ * Returns null for loopback hosts so the platform default (emulator/simulator)
+ * can be used instead.
+ */
+function lanHostFromUri(uri?: string | null): string | null {
+  if (!uri) return null;
+
+  let value = uri.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  value = value.split("/")[0];
+  if (!value) return null;
+
+  let host: string;
+  if (value.startsWith("[")) {
+    const end = value.indexOf("]");
+    if (end < 0) return null;
+    host = value.slice(0, end + 1);
+  } else {
+    host = value.split(":")[0];
+  }
+
+  if (
+    !host ||
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "[::1]"
+  ) {
+    return null;
+  }
+  return host;
+}
+
+function developmentApiUrl(): string | null {
+  if (!__DEV__) return null;
+
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    const webHost = lanHostFromUri(window.location.hostname);
+    if (webHost) {
+      return `${window.location.protocol === "https:" ? "https" : "http"}://${webHost}:${API_PORT}`;
+    }
+    return null;
+  }
+
+  const expoHost = lanHostFromUri(Constants.expoConfig?.hostUri);
+  if (expoHost) {
+    return `http://${expoHost}:${API_PORT}`;
+  }
+
+  return null;
+}
+
+const configuredUrl = process.env.EXPO_PUBLIC_POCKETBASE_URL?.trim();
+
+export const POCKETBASE_URL = normalizeBaseUrl(
+  configuredUrl || developmentApiUrl() || DEFAULT_URL,
+);
 
 // PocketBase realtime uses the global EventSource, which React Native does not
 // provide. The web build already has a native implementation.
@@ -448,7 +511,7 @@ export async function subscribeToConversations(
 export function describeError(error: unknown): string {
   if (error instanceof ClientResponseError) {
     if (error.status === 0) {
-      return `Can't reach the Open Services server at ${POCKETBASE_URL}. Is it running?`;
+      return `Can't reach the Open Services server at ${POCKETBASE_URL}. Check that the backend is running and, on a phone, that the device and computer are on the same Wi-Fi network.`;
     }
 
     const data = error.response?.data;
