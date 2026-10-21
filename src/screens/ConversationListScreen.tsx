@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import { useMemo } from "react";
 import {
   FlatList,
@@ -10,7 +11,10 @@ import {
 import { formatTimestamp } from "../api/pocketbase";
 import { Avatar } from "../components/Avatar";
 import { EmptyState, LoadingInline } from "../components/Feedback";
+import { ScreenHeader } from "../components/ScreenHeader";
+import { Logo } from "../components/Logo";
 import { styles } from "../styles";
+import { colors } from "../theme";
 import type {
   Conversation,
   ConversationFilter,
@@ -73,48 +77,63 @@ export function ConversationListScreen({
 
   return (
     <View style={styles.flex}>
-      <View style={styles.homeHeader}>
-        <View>
-          <Text style={styles.eyebrow}>PLANNING CENTER</Text>
-          <Text style={styles.homeTitle}>Conversations</Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open profile"
-          onPress={onProfile}
-          style={styles.profileButton}
-        >
-          <Avatar person={me} size={40} />
-          <View style={styles.onlineDot} />
-        </Pressable>
-      </View>
-      <View style={styles.searchBox}>
-        <Text style={styles.searchIcon}>⌕</Text>
-        <TextInput
-          value={query}
-          onChangeText={onQueryChange}
-          placeholder="Search conversations"
-          placeholderTextColor="#8D919C"
-          style={styles.searchInput}
-          returnKeyType="search"
-          accessibilityLabel="Search conversations"
-        />
-        {query.length > 0 ? (
+      <ScreenHeader>
+        <View style={styles.brandRow}>
+          <View style={styles.brandLockup}>
+            <Logo size={28} tone="paper" />
+            <Text style={styles.wordmark}>Open Services</Text>
+          </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Clear search"
-            onPress={() => onQueryChange("")}
-            style={styles.clearButton}
+            accessibilityLabel="Open profile"
+            onPress={onProfile}
+            style={styles.profileButton}
           >
-            <Text style={styles.clearButtonText}>×</Text>
+            <Avatar person={me} size={38} />
+            <View style={styles.onlineDot} />
           </Pressable>
-        ) : null}
-      </View>
+        </View>
+        <Text style={styles.screenTitle}>Conversations</Text>
+        <Text style={styles.screenMeta}>
+          {unread > 0
+            ? `${unread} unread across ${conversations.length} ${
+                conversations.length === 1 ? "conversation" : "conversations"
+              }`
+            : "You're up to date."}
+        </Text>
+        <View style={styles.searchBox}>
+          <Feather
+            name="search"
+            size={16}
+            color={colors.chromeSoft}
+            style={{ marginRight: 8 }}
+          />
+          <TextInput
+            value={query}
+            onChangeText={onQueryChange}
+            placeholder="Search conversations"
+            placeholderTextColor={colors.chromeSoft}
+            style={styles.searchInput}
+            returnKeyType="search"
+            accessibilityLabel="Search conversations"
+          />
+          {query.length > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              onPress={() => onQueryChange("")}
+              style={styles.clearButton}
+            >
+              <Feather name="x" size={16} color={colors.chromeSoft} />
+            </Pressable>
+          ) : null}
+        </View>
+      </ScreenHeader>
       <View style={styles.filterBar}>
         {(
           [
             ["all", "All"],
-            ["unread", `Unread${unread > 0 ? ` · ${unread}` : ""}`],
+            ["unread", "Unread"],
             ["teams", "Teams"],
           ] as [ConversationFilter, string][]
         ).map(([value, label]) => {
@@ -125,15 +144,24 @@ export function ConversationListScreen({
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
               onPress={() => onFilterChange(value)}
-              style={active ? styles.filterPillActive : styles.filterPill}
+              style={styles.filterTab}
             >
-              <Text style={active ? styles.filterTextActive : styles.filterText}>
-                {label}
-              </Text>
+              <View style={styles.filterTabRow}>
+                <Text
+                  style={active ? styles.filterTextActive : styles.filterText}
+                >
+                  {label}
+                </Text>
+                {value === "unread" && unread > 0 ? (
+                  <Text style={styles.filterCount}>{unread}</Text>
+                ) : null}
+              </View>
+              {active ? <View style={styles.filterMarker} /> : null}
             </Pressable>
           );
         })}
       </View>
+
       <FlatList
         style={styles.flex}
         data={visible}
@@ -179,7 +207,7 @@ export function ConversationListScreen({
                   ? `Nothing matches “${query.trim()}”. Try a person, team, or message.`
                   : filter === "unread"
                     ? "Unread conversations will appear here."
-                    : "Tap + to start a conversation."
+                    : "Start a conversation with the compose button."
               }
             />
           )
@@ -237,14 +265,21 @@ export function ConversationListScreen({
           );
         }}
       />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="New conversation"
-        style={styles.composeButton}
-        onPress={onCreate}
-      >
-        <Text style={styles.composeButtonText}>＋</Text>
-      </Pressable>
+      <View pointerEvents="box-none" style={styles.fabLayer}>
+        <View
+          pointerEvents="box-none"
+          style={[styles.column, styles.fabColumn]}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="New conversation"
+            style={styles.composeButton}
+            onPress={onCreate}
+          >
+            <Feather name="edit-3" size={22} color={colors.paper} />
+          </Pressable>
+        </View>
+      </View>
     </View>
   );
 }

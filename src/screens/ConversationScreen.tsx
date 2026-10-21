@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -20,6 +21,7 @@ import {
   summarizeReactions,
 } from "../lib/messages";
 import { styles } from "../styles";
+import { colors } from "../theme";
 import type {
   Conversation,
   ConversationRead,
@@ -133,7 +135,7 @@ export function ConversationScreen({
         title={conversation.title}
         onBack={onBack}
         action={{
-          label: "⋯",
+          icon: "more-horizontal",
           onPress: onOpenMenu,
           accessibilityLabel: "Conversation options",
         }}
@@ -143,14 +145,18 @@ export function ConversationScreen({
         onPress={onDetails}
         style={styles.conversationSubheader}
       >
-        <Text
-          style={typingNames.length > 0 ? styles.typingText : styles.subheaderText}
-        >
-          {typingNames.length > 0
-            ? `${typingNames.join(", ")} ${typingNames.length === 1 ? "is" : "are"} typing…`
-            : `${conversation.participants.length + 1} participants`}
-        </Text>
-        <Text style={styles.subheaderAction}>Details ›</Text>
+        <View style={styles.subheaderInner}>
+          <Text
+            style={
+              typingNames.length > 0 ? styles.typingText : styles.subheaderText
+            }
+          >
+            {typingNames.length > 0
+              ? `${typingNames.join(", ")} ${typingNames.length === 1 ? "is" : "are"} typing…`
+              : `${conversation.participants.length + 1} participants`}
+          </Text>
+          <Text style={styles.subheaderAction}>Details ›</Text>
+        </View>
       </Pressable>
       <FlatList
         ref={listRef}
@@ -290,83 +296,99 @@ export function ConversationScreen({
         }}
       />
       {error ? (
-        <View style={styles.inlineError}>
-          <Text style={styles.inlineErrorText}>{error}</Text>
+        <View style={styles.insetColumn}>
+          <View style={styles.inlineError}>
+            <Text style={styles.inlineErrorText}>{error}</Text>
+          </View>
         </View>
       ) : null}
       {editingMessage ? (
         <View style={styles.composerContext}>
-          <View style={styles.flex}>
-            <Text style={styles.composerContextLabel}>EDITING MESSAGE</Text>
-            <Text numberOfLines={1} style={styles.composerContextText}>
-              {editingMessage.body}
-            </Text>
+          <View style={styles.composerContextInner}>
+            <View style={styles.flex}>
+              <Text style={styles.composerContextLabel}>EDITING MESSAGE</Text>
+              <Text numberOfLines={1} style={styles.composerContextText}>
+                {editingMessage.body}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel editing"
+              onPress={() => {
+                setDraft("");
+                onCancelEdit();
+              }}
+              hitSlop={8}
+            >
+              <Feather name="x" size={18} color={colors.muted} />
+            </Pressable>
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Cancel editing"
-            onPress={() => {
-              setDraft("");
-              onCancelEdit();
-            }}
-            hitSlop={8}
-          >
-            <Text style={styles.composerContextClose}>×</Text>
-          </Pressable>
         </View>
       ) : replyTo ? (
         <View style={styles.composerContext}>
-          <View style={styles.flex}>
-            <Text style={styles.composerContextLabel}>
-              REPLYING TO{" "}
-              {replyTo.author.id === me.id ? "YOURSELF" : replyTo.author.name.toUpperCase()}
-            </Text>
-            <Text numberOfLines={1} style={styles.composerContextText}>
-              {replyTo.body}
-            </Text>
+          <View style={styles.composerContextInner}>
+            <View style={styles.flex}>
+              <Text style={styles.composerContextLabel}>
+                REPLYING TO{" "}
+                {replyTo.author.id === me.id
+                  ? "YOURSELF"
+                  : replyTo.author.name.toUpperCase()}
+              </Text>
+              <Text numberOfLines={1} style={styles.composerContextText}>
+                {replyTo.body}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel reply"
+              onPress={onCancelReply}
+              hitSlop={8}
+            >
+              <Feather name="x" size={18} color={colors.muted} />
+            </Pressable>
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Cancel reply"
-            onPress={onCancelReply}
-            hitSlop={8}
-          >
-            <Text style={styles.composerContextClose}>×</Text>
-          </Pressable>
         </View>
       ) : null}
       <View style={styles.composer}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Add attachment"
-          style={styles.attachmentButton}
-          onPress={onAttach}
-        >
-          <Text style={styles.attachmentText}>＋</Text>
-        </Pressable>
-        <TextInput
-          value={draft}
-          onChangeText={changeDraft}
-          placeholder={editingMessage ? "Edit message..." : "Write a message..."}
-          placeholderTextColor="#8D919C"
-          style={styles.composerInput}
-          multiline
-          accessibilityLabel="Message"
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={editingMessage ? "Save message" : "Send message"}
-          accessibilityState={{ disabled: !canSend }}
-          disabled={!canSend}
-          onPress={submit}
-          style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
-        >
-          {sending ? (
-            <ActivityIndicator color="#FFF" size="small" />
-          ) : (
-            <Text style={styles.sendText}>{editingMessage ? "✓" : "↑"}</Text>
-          )}
-        </Pressable>
+        <View style={styles.composerInner}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add attachment"
+            style={styles.attachmentButton}
+            onPress={onAttach}
+          >
+            <Feather name="plus" size={19} color={colors.ink} />
+          </Pressable>
+          <TextInput
+            value={draft}
+            onChangeText={changeDraft}
+            placeholder={
+              editingMessage ? "Edit message..." : "Write a message..."
+            }
+            placeholderTextColor={colors.faint}
+            style={styles.composerInput}
+            multiline
+            accessibilityLabel="Message"
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={editingMessage ? "Save message" : "Send message"}
+            accessibilityState={{ disabled: !canSend }}
+            disabled={!canSend}
+            onPress={submit}
+            style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
+          >
+            {sending ? (
+              <ActivityIndicator color={colors.paper} size="small" />
+            ) : (
+              <Feather
+                name={editingMessage ? "check" : "arrow-up"}
+                size={19}
+                color={colors.paper}
+              />
+            )}
+          </Pressable>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );

@@ -1,8 +1,16 @@
+import Feather from "@expo/vector-icons/Feather";
 import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { styles } from "../styles";
+import { colors } from "../theme";
 import type { Tab } from "../types";
+
+const items: [Tab, keyof typeof Feather.glyphMap, string][] = [
+  ["chat", "message-square", "Chat"],
+  ["activity", "bell", "Activity"],
+  ["profile", "user", "Profile"],
+];
 
 export function BottomTabs({
   tab,
@@ -14,39 +22,45 @@ export function BottomTabs({
   onChange: (tab: Tab) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const items: [Tab, string, string][] = [
-    ["chat", "▤", "Chat"],
-    ["activity", "◷", "Activity"],
-    ["profile", "◎", "Profile"],
-  ];
 
   return (
-    <View style={[styles.bottomTabs, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-      {items.map(([value, icon, label]) => {
-        const active = tab === value;
-        return (
-          <Pressable
-            key={value}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: active }}
-            accessibilityLabel={label}
-            onPress={() => onChange(value)}
-            style={styles.tab}
-          >
-            <View style={styles.tabIconWrap}>
-              <Text style={[styles.tabIcon, active && styles.tabIconActive]}>
-                {icon}
+    <View
+      style={[
+        styles.bottomTabs,
+        { paddingBottom: Math.max(insets.bottom, 8) },
+      ]}
+    >
+      <View style={styles.tabsInner}>
+        {items.map(([value, icon, label]) => {
+          const active = tab === value;
+          return (
+            <Pressable
+              key={value}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={label}
+              onPress={() => onChange(value)}
+              style={styles.tab}
+            >
+              <View style={styles.tabIconWrap}>
+                <Feather
+                  name={icon}
+                  size={20}
+                  color={active ? colors.paper : colors.chromeSoft}
+                />
+                {value === "chat" && unread > 0 ? (
+                  <Text style={styles.tabBadge}>
+                    {unread > 99 ? "99+" : unread}
+                  </Text>
+                ) : null}
+              </View>
+              <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
+                {label}
               </Text>
-              {value === "chat" && unread > 0 ? (
-                <Text style={styles.tabBadge}>{unread}</Text>
-              ) : null}
-            </View>
-            <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
-              {label}
-            </Text>
-          </Pressable>
-        );
-      })}
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }

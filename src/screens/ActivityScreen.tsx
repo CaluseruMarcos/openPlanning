@@ -2,6 +2,8 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { formatTimestamp } from "../api/pocketbase";
 import { Avatar } from "../components/Avatar";
+import { Logo } from "../components/Logo";
+import { ScreenHeader } from "../components/ScreenHeader";
 import { styles } from "../styles";
 import type { Conversation, Person } from "../types";
 
@@ -39,10 +41,18 @@ export function ActivityScreen({
 
   return (
     <View style={styles.flex}>
-      <View style={styles.simpleHeader}>
-        <Text style={styles.eyebrow}>PLANNING CENTER</Text>
-        <Text style={styles.homeTitle}>Activity</Text>
-      </View>
+      <ScreenHeader>
+        <View style={styles.brandRow}>
+          <View style={styles.brandLockup}>
+            <Logo size={28} tone="paper" />
+            <Text style={styles.wordmark}>Open Services</Text>
+          </View>
+        </View>
+        <Text style={styles.screenTitle}>Activity</Text>
+        <Text style={styles.screenMeta}>
+          Recent activity from your conversations.
+        </Text>
+      </ScreenHeader>
       <ScrollView contentContainerStyle={styles.listContent}>
         <Text style={styles.sectionLabel}>NEEDS ATTENTION</Text>
         {unreadItems.length === 0 ? (

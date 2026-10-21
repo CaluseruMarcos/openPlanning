@@ -1,8 +1,10 @@
+import Feather from "@expo/vector-icons/Feather";
 import type { ReactNode } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { styles } from "../styles";
+import { colors } from "../theme";
 
 export function SheetRow({
   label,
@@ -29,7 +31,9 @@ export function SheetRow({
         </Text>
         {hint ? <Text style={styles.sheetRowHint}>{hint}</Text> : null}
       </View>
-      {chevron ? <Text style={styles.sheetChevron}>›</Text> : null}
+      {chevron ? (
+        <Feather name="chevron-right" size={18} color={colors.faint} />
+      ) : null}
     </Pressable>
   );
 }

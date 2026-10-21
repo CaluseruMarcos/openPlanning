@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar } from "../components/Avatar";
 import { Header } from "../components/Header";
 import { styles } from "../styles";
+import { colors } from "../theme";
 import type { Conversation, Person } from "../types";
 
 export function DetailsScreen({
@@ -74,8 +75,8 @@ export function DetailsScreen({
             <Switch
               value={muted}
               onValueChange={onToggleMute}
-              trackColor={{ false: "#D6D8E0", true: "#B9BCF0" }}
-              thumbColor={muted ? "#5B61D6" : "#F7F7F9"}
+              trackColor={{ false: colors.lineStrong, true: colors.infoTint }}
+              thumbColor={muted ? colors.chrome : colors.paperBright}
             />
           </View>
         </View>

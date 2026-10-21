@@ -1,7 +1,11 @@
+import Feather from "@expo/vector-icons/Feather";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { Avatar } from "../components/Avatar";
+import { Logo } from "../components/Logo";
+import { ScreenHeader } from "../components/ScreenHeader";
 import { styles } from "../styles";
+import { colors } from "../theme";
 import type {
   Conversation,
   NotificationPref,
@@ -30,16 +34,25 @@ export function ProfileScreen({
 
   return (
     <View style={styles.flex}>
-      <View style={styles.simpleHeader}>
-        <Text style={styles.eyebrow}>PLANNING CENTER</Text>
-        <Text style={styles.homeTitle}>Profile</Text>
-      </View>
+      <ScreenHeader>
+        <View style={styles.brandRow}>
+          <View style={styles.brandLockup}>
+            <Logo size={28} tone="paper" />
+            <Text style={styles.wordmark}>Open Services</Text>
+          </View>
+          <Avatar person={session.user} size={36} />
+        </View>
+        <Text style={styles.screenTitle}>Profile</Text>
+        <Text numberOfLines={1} style={styles.screenMeta}>
+          {session.email || "Signed in to this workspace"}
+        </Text>
+      </ScreenHeader>
       <ScrollView contentContainerStyle={styles.profileContent}>
         <View style={styles.profileCard}>
           <Avatar person={session.user} size={56} />
           <View style={styles.flex}>
             <Text style={styles.profileName}>{session.user.name}</Text>
-            <Text style={styles.profileSubtitle}>
+            <Text numberOfLines={1} style={styles.profileSubtitle}>
               {session.email || "Email account"}
             </Text>
           </View>
@@ -50,7 +63,7 @@ export function ProfileScreen({
             <Text style={styles.statValue}>{conversations.length}</Text>
             <Text style={styles.statLabel}>Conversations</Text>
           </View>
-          <View style={styles.statCard}>
+          <View style={[styles.statCard, styles.statCardDivider]}>
             <Text style={styles.statValue}>{unread}</Text>
             <Text style={styles.statLabel}>Unread</Text>
           </View>
@@ -91,7 +104,7 @@ export function ProfileScreen({
             style={styles.optionRow}
           >
             <Text style={styles.settingTitle}>About this rebuild</Text>
-            <Text style={styles.sheetChevron}>›</Text>
+            <Feather name="chevron-right" size={18} color={colors.faint} />
           </Pressable>
         </View>
 

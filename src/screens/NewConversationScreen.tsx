@@ -1,10 +1,12 @@
 import { FlatList, Pressable, Text, View } from "react-native";
+import Feather from "@expo/vector-icons/Feather";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "../components/Avatar";
 import { EmptyState, LoadingInline } from "../components/Feedback";
 import { Header } from "../components/Header";
 import { styles } from "../styles";
+import { colors } from "../theme";
 import type { Person } from "../types";
 
 export function NewConversationScreen({
@@ -67,7 +69,7 @@ export function NewConversationScreen({
                 <Text style={styles.personName}>{item.name}</Text>
                 <Text style={styles.personHint}>Direct message</Text>
               </View>
-              <Text style={styles.sheetChevron}>›</Text>
+              <Feather name="chevron-right" size={18} color={colors.faint} />
             </Pressable>
           )}
         />

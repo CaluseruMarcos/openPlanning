@@ -44,6 +44,7 @@ import { NewConversationScreen } from "./screens/NewConversationScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
 import { SignInScreen } from "./screens/SignInScreen";
 import { styles } from "./styles";
+import { colors } from "./theme";
 import type {
   AuthMode,
   Conversation,
@@ -431,7 +432,6 @@ export function AppShell() {
     }
   }
 
-  const contentStyle = { paddingTop: insets.top };
   const selectedConversation =
     workspace.conversations.find(
       (conversation) => conversation.id === selectedId,
@@ -495,7 +495,7 @@ export function AppShell() {
         <StatusBar style="dark" />
         <View style={styles.centered}>
           <Logo size={104} />
-          <ActivityIndicator color="#5B61D6" size="large" />
+          <ActivityIndicator color={colors.accentDeep} size="large" />
           <Text style={styles.loadingText}>Starting Open Services…</Text>
         </View>
       </View>
@@ -505,7 +505,7 @@ export function AppShell() {
   if (!session) {
     return (
       <View style={styles.app}>
-        <StatusBar style="dark" />
+        <StatusBar style="light" />
         <SignInScreen
           busy={authBusy}
           error={authError}
@@ -520,13 +520,28 @@ export function AppShell() {
   const conversationMuted = selectedId ? Boolean(mutedIds[selectedId]) : false;
   const selectedCanDelete = selectedConversation?.createdBy === session.user.id;
   const detailsCanDelete = detailsConversation?.createdBy === session.user.id;
+  const chromeVisible =
+    !selectedConversation && !detailsConversation && !composing;
+  // Every screen starts with its own header, so the status-bar strip takes that
+  // header's surface colour instead of the canvas.
+  const headerSurface = chromeVisible ? colors.chrome : colors.paper;
 
   return (
     <View style={styles.app}>
-      <StatusBar style="dark" />
-      <View style={[styles.flex, contentStyle]}>
+      <StatusBar style={chromeVisible ? "light" : "dark"} />
+      <View style={styles.page}>
+        <View
+          style={{ backgroundColor: headerSurface, height: insets.top }}
+        />
         {workspace.dataError ? (
-          <ErrorBanner message={workspace.dataError} onRetry={retryWorkspace} />
+          <View style={{ backgroundColor: headerSurface }}>
+            <View style={styles.insetColumn}>
+              <ErrorBanner
+                message={workspace.dataError}
+                onRetry={retryWorkspace}
+              />
+            </View>
+          </View>
         ) : null}
         {selectedConversation ? (
           <ConversationScreen
@@ -611,19 +626,19 @@ export function AppShell() {
             onCreate={openCompose}
           />
         )}
+        {selectedConversation || detailsConversation || composing ? null : (
+          <BottomTabs
+            tab={tab}
+            unread={unread}
+            onChange={(nextTab) => {
+              setTab(nextTab);
+              setSelectedId(null);
+              setDetailsId(null);
+              setComposing(false);
+            }}
+          />
+        )}
       </View>
-      {selectedConversation || detailsConversation || composing ? null : (
-        <BottomTabs
-          tab={tab}
-          unread={unread}
-          onChange={(nextTab) => {
-            setTab(nextTab);
-            setSelectedId(null);
-            setDetailsId(null);
-            setComposing(false);
-          }}
-        />
-      )}
 
       {selectedConversation ? (
         <>
