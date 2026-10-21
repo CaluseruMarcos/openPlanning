@@ -1,2 +1,4 @@
 SESSION_SECRET=replace-with-a-long-random-string
 TICKET_SECRET=replace-with-another-long-random-string
+# Protects the endpoints that create invite codes. At least 32 characters.
+ADMIN_KEY=replace-with-a-third-long-random-string
