@@ -9,7 +9,14 @@ import PocketBase, {
 } from "pocketbase";
 import { Platform } from "react-native";
 
-import type { Conversation, Message, Person } from "../types";
+import type {
+  Conversation,
+  ConversationRead,
+  Message,
+  Person,
+  Reaction,
+  TypingIndicator,
+} from "../types";
 
 const AUTH_KEY = "open-services-auth";
 const API_PORT = 8090;
@@ -167,7 +174,34 @@ type PBMessage = RecordModel & {
   author: string;
   body: string;
   created: string;
-  expand?: { author?: PBUserRecord };
+  reply_to?: string;
+  edited_at?: string;
+  expand?: {
+    author?: PBUserRecord;
+    reply_to?: PBMessage;
+  };
+};
+
+type PBReaction = RecordModel & {
+  message: string;
+  user: string;
+  emoji: string;
+  created: string;
+  expand?: { user?: PBUserRecord };
+};
+
+type PBConversationRead = RecordModel & {
+  conversation: string;
+  user: string;
+  last_read_message?: string;
+  last_read_at: string;
+  expand?: { user?: PBUserRecord };
+};
+
+type PBTypingIndicator = RecordModel & {
+  conversation: string;
+  user: string;
+  last_seen: string;
 };
 
 export type SessionUser = {
@@ -185,6 +219,24 @@ export type MessageSubscriptionEvent = {
 export type ConversationSubscriptionEvent = {
   action: string;
   record: PBConversation;
+};
+
+export type ReactionSubscriptionEvent = {
+  action: string;
+  record: PBReaction;
+  reaction?: Reaction;
+};
+
+export type ConversationReadSubscriptionEvent = {
+  action: string;
+  record: PBConversationRead;
+  read?: ConversationRead;
+};
+
+export type TypingSubscriptionEvent = {
+  action: string;
+  record: PBTypingIndicator;
+  typing?: TypingIndicator;
 };
 
 const PERSON_COLORS = [
@@ -275,7 +327,21 @@ function sessionUserFromRecord(record: AuthRecord): SessionUser | null {
   return { id: record.id, name, email };
 }
 
-function toMessage(record: PBMessage): Message {
+function toMessage(record: PBMessage, reactions: Reaction[] = []): Message {
+  const replyRecord = record.expand?.reply_to;
+  const replyTo = record.reply_to
+    ? {
+        id: record.reply_to,
+        author: toPerson(
+          replyRecord?.expand?.author ?? {
+            id: replyRecord?.author ?? "unknown",
+            name: "Member",
+          },
+        ),
+        body: replyRecord?.body ?? "The original message is unavailable.",
+      }
+    : null;
+
   return {
     id: record.id,
     conversationId: record.conversation,
@@ -285,6 +351,33 @@ function toMessage(record: PBMessage): Message {
     body: record.body,
     createdAt: formatTimestamp(record.created),
     createdAtIso: record.created,
+    editedAt: record.edited_at || undefined,
+    replyTo,
+    reactions,
+  };
+}
+
+function toReaction(record: PBReaction): Reaction {
+  return {
+    id: record.id,
+    messageId: record.message,
+    emoji: record.emoji,
+    user: toPerson(
+      record.expand?.user ?? { id: record.user, name: "Member" },
+    ),
+    createdAtIso: record.created,
+  };
+}
+
+function toConversationRead(record: PBConversationRead): ConversationRead {
+  return {
+    id: record.id,
+    conversationId: record.conversation,
+    user: toPerson(
+      record.expand?.user ?? { id: record.user, name: "Member" },
+    ),
+    lastReadAt: record.last_read_at,
+    lastReadMessageId: record.last_read_message || undefined,
   };
 }
 
@@ -416,17 +509,43 @@ export async function fetchPeople(
     .map((record) => toPerson(record));
 }
 
-export async function fetchMessages(
+async function fetchReactionRecords(
   conversationId: string,
-): Promise<Message[]> {
-  const records = await pb.collection("messages").getFullList<PBMessage>({
-    filter: pb.filter("conversation = {:conversation}", {
+): Promise<PBReaction[]> {
+  return pb.collection("message_reactions").getFullList<PBReaction>({
+    filter: pb.filter("message.conversation = {:conversation}", {
       conversation: conversationId,
     }),
     sort: "created",
-    expand: "author",
+    expand: "user",
   });
-  return records.map(toMessage);
+}
+
+export async function fetchMessages(
+  conversationId: string,
+): Promise<Message[]> {
+  const [records, reactionRecords] = await Promise.all([
+    pb.collection("messages").getFullList<PBMessage>({
+      filter: pb.filter("conversation = {:conversation}", {
+        conversation: conversationId,
+      }),
+      sort: "created",
+      expand: "author,reply_to.author",
+    }),
+    fetchReactionRecords(conversationId),
+  ]);
+
+  const reactionsByMessage = new Map<string, Reaction[]>();
+  for (const record of reactionRecords) {
+    const reaction = toReaction(record);
+    const list = reactionsByMessage.get(reaction.messageId) ?? [];
+    list.push(reaction);
+    reactionsByMessage.set(reaction.messageId, list);
+  }
+
+  return records.map((record) =>
+    toMessage(record, reactionsByMessage.get(record.id) ?? []),
+  );
 }
 
 export async function searchMessageConversations(
@@ -443,12 +562,55 @@ export async function createMessage(
   conversationId: string,
   authorId: string,
   body: string,
+  replyToId?: string,
 ): Promise<Message> {
   const record = await pb.collection("messages").create<PBMessage>(
-    { conversation: conversationId, author: authorId, body },
-    { expand: "author" },
+    {
+      conversation: conversationId,
+      author: authorId,
+      body,
+      ...(replyToId ? { reply_to: replyToId } : {}),
+    },
+    { expand: "author,reply_to.author" },
   );
   return toMessage(record);
+}
+
+export async function editMessage(
+  messageId: string,
+  body: string,
+): Promise<Message> {
+  const record = await pb.collection("messages").update<PBMessage>(
+    messageId,
+    {
+      body,
+      edited_at: new Date().toISOString(),
+    },
+    { expand: "author,reply_to.author" },
+  );
+  return toMessage(record);
+}
+
+export async function deleteMessage(messageId: string): Promise<void> {
+  await pb.collection("messages").delete(messageId);
+}
+
+export async function addReaction(
+  messageId: string,
+  userId: string,
+  emoji: string,
+): Promise<Reaction> {
+  const record = await pb
+    .collection("message_reactions")
+    .create<PBReaction>(
+      { message: messageId, user: userId, emoji },
+      { expand: "user" },
+    );
+  return toReaction(record);
+}
+
+export async function removeReaction(reactionId: string): Promise<void> {
+  await pb.collection("message_reactions").delete(reactionId);
 }
 
 export async function createDirectConversation(
@@ -480,6 +642,213 @@ export async function removeConversation(conversationId: string): Promise<void> 
   await pb.collection("conversations").delete(conversationId);
 }
 
+async function findConversationRead(
+  conversationId: string,
+  userId: string,
+): Promise<PBConversationRead | null> {
+  try {
+    return await pb
+      .collection("conversation_reads")
+      .getFirstListItem<PBConversationRead>(
+        pb.filter("conversation = {:conversation} && user = {:user}", {
+          conversation: conversationId,
+          user: userId,
+        }),
+        { expand: "user" },
+      );
+  } catch (error) {
+    if (error instanceof ClientResponseError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function fetchConversationReads(
+  conversationId: string,
+): Promise<ConversationRead[]> {
+  const records = await pb
+    .collection("conversation_reads")
+    .getFullList<PBConversationRead>({
+      filter: pb.filter("conversation = {:conversation}", {
+        conversation: conversationId,
+      }),
+      expand: "user",
+    });
+  return records.map(toConversationRead);
+}
+
+/**
+ * Upsert the caller's read position. `readAtIso` should be the server timestamp
+ * of the newest message they have seen so receipts compare consistently.
+ */
+export async function markConversationRead(
+  conversationId: string,
+  userId: string,
+  lastReadMessageId: string | null,
+  readAtIso: string,
+): Promise<ConversationRead | null> {
+  const data = {
+    last_read_message: lastReadMessageId ?? "",
+    last_read_at: readAtIso,
+  };
+  const existing = await findConversationRead(conversationId, userId);
+
+  if (existing) {
+    const current = parsePocketBaseDate(existing.last_read_at)?.getTime() ?? 0;
+    const target = parsePocketBaseDate(readAtIso)?.getTime() ?? 0;
+    if (current >= target) return toConversationRead(existing);
+
+    const updated = await pb
+      .collection("conversation_reads")
+      .update<PBConversationRead>(existing.id, data, { expand: "user" });
+    return toConversationRead(updated);
+  }
+
+  try {
+    const created = await pb
+      .collection("conversation_reads")
+      .create<PBConversationRead>(
+        { conversation: conversationId, user: userId, ...data },
+        { expand: "user" },
+      );
+    return toConversationRead(created);
+  } catch (error) {
+    // A concurrent request may have created the unique (conversation, user)
+    // row between our lookup and insert.
+    if (error instanceof ClientResponseError && error.status === 400) {
+      const retry = await findConversationRead(conversationId, userId);
+      if (retry) {
+        const current = parsePocketBaseDate(retry.last_read_at)?.getTime() ?? 0;
+        const target = parsePocketBaseDate(readAtIso)?.getTime() ?? 0;
+        if (current >= target) return toConversationRead(retry);
+        const updated = await pb
+          .collection("conversation_reads")
+          .update<PBConversationRead>(retry.id, data, { expand: "user" });
+        return toConversationRead(updated);
+      }
+    }
+    throw error;
+  }
+}
+
+const typingRecordIds = new Map<string, string>();
+
+function typingKey(conversationId: string, userId: string): string {
+  return `${conversationId}:${userId}`;
+}
+
+export async function fetchTypingIndicators(
+  conversationId: string,
+): Promise<TypingIndicator[]> {
+  const records = await pb
+    .collection("typing_indicators")
+    .getFullList<PBTypingIndicator>({
+      filter: pb.filter("conversation = {:conversation}", {
+        conversation: conversationId,
+      }),
+    });
+  return records.map((record) => ({
+    conversationId: record.conversation,
+    userId: record.user,
+    lastSeenIso: record.last_seen,
+  }));
+}
+
+export async function heartbeatTyping(
+  conversationId: string,
+  userId: string,
+): Promise<void> {
+  const lastSeen = new Date().toISOString();
+  const key = typingKey(conversationId, userId);
+  const cachedId = typingRecordIds.get(key);
+
+  if (cachedId) {
+    try {
+      await pb
+        .collection("typing_indicators")
+        .update(cachedId, { last_seen: lastSeen });
+      return;
+    } catch (error) {
+      if (!(error instanceof ClientResponseError) || error.status !== 404) {
+        throw error;
+      }
+      typingRecordIds.delete(key);
+    }
+  }
+
+  let existing: PBTypingIndicator | null = null;
+  try {
+    existing = await pb
+      .collection("typing_indicators")
+      .getFirstListItem<PBTypingIndicator>(
+        pb.filter("conversation = {:conversation} && user = {:user}", {
+          conversation: conversationId,
+          user: userId,
+        }),
+        { fields: "id" },
+      );
+  } catch (error) {
+    if (!(error instanceof ClientResponseError) || error.status !== 404) {
+      throw error;
+    }
+  }
+
+  if (existing) {
+    typingRecordIds.set(key, existing.id);
+    await pb
+      .collection("typing_indicators")
+      .update(existing.id, { last_seen: lastSeen });
+    return;
+  }
+
+  const created = await pb
+    .collection("typing_indicators")
+    .create<PBTypingIndicator>({
+      conversation: conversationId,
+      user: userId,
+      last_seen: lastSeen,
+    });
+  typingRecordIds.set(key, created.id);
+}
+
+export async function clearTypingIndicator(
+  conversationId: string,
+  userId: string,
+): Promise<void> {
+  const key = typingKey(conversationId, userId);
+  const cachedId = typingRecordIds.get(key);
+  typingRecordIds.delete(key);
+
+  if (cachedId) {
+    try {
+      await pb.collection("typing_indicators").delete(cachedId);
+      return;
+    } catch (error) {
+      if (!(error instanceof ClientResponseError) || error.status !== 404) {
+        throw error;
+      }
+    }
+  }
+
+  try {
+    const existing = await pb
+      .collection("typing_indicators")
+      .getFirstListItem<PBTypingIndicator>(
+        pb.filter("conversation = {:conversation} && user = {:user}", {
+          conversation: conversationId,
+          user: userId,
+        }),
+        { fields: "id" },
+      );
+    await pb.collection("typing_indicators").delete(existing.id);
+  } catch (error) {
+    if (!(error instanceof ClientResponseError) || error.status !== 404) {
+      throw error;
+    }
+  }
+}
+
 export async function subscribeToMessages(
   onEvent: (event: MessageSubscriptionEvent) => void,
 ): Promise<() => Promise<void>> {
@@ -492,7 +861,7 @@ export async function subscribeToMessages(
         message: event.action === "delete" ? undefined : toMessage(event.record),
       });
     },
-    { expand: "author" },
+    { expand: "author,reply_to.author" },
   );
 }
 
@@ -506,6 +875,65 @@ export async function subscribeToConversations(
     },
     { expand: "participants" },
   );
+}
+
+export async function subscribeToReactions(
+  onEvent: (event: ReactionSubscriptionEvent) => void,
+): Promise<() => Promise<void>> {
+  return pb.collection("message_reactions").subscribe<PBReaction>(
+    "*",
+    (event) => {
+      onEvent({
+        action: event.action,
+        record: event.record,
+        reaction:
+          event.action === "delete" ? undefined : toReaction(event.record),
+      });
+    },
+    { expand: "user" },
+  );
+}
+
+export async function subscribeToConversationReads(
+  onEvent: (event: ConversationReadSubscriptionEvent) => void,
+): Promise<() => Promise<void>> {
+  return pb
+    .collection("conversation_reads")
+    .subscribe<PBConversationRead>(
+      "*",
+      (event) => {
+        onEvent({
+          action: event.action,
+          record: event.record,
+          read:
+            event.action === "delete"
+              ? undefined
+              : toConversationRead(event.record),
+        });
+      },
+      { expand: "user" },
+    );
+}
+
+export async function subscribeToTypingIndicators(
+  onEvent: (event: TypingSubscriptionEvent) => void,
+): Promise<() => Promise<void>> {
+  return pb
+    .collection("typing_indicators")
+    .subscribe<PBTypingIndicator>("*", (event) => {
+      onEvent({
+        action: event.action,
+        record: event.record,
+        typing:
+          event.action === "delete"
+            ? undefined
+            : {
+                conversationId: event.record.conversation,
+                userId: event.record.user,
+                lastSeenIso: event.record.last_seen,
+              },
+      });
+    });
 }
 
 export function describeError(error: unknown): string {

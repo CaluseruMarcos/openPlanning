@@ -38,6 +38,9 @@ Demo accounts created by the seed:
 Local admin (not for production): `admin@openservices.local` / `devpassword`.
 Override with `PB_ADMIN_EMAIL`, `PB_ADMIN_PASSWORD`, or `PB_DEMO_PASSWORD`.
 
+The seed also adds a quoted reply, reaction chips, and read receipts to the
+Worship Team conversation so the Phase 1 social features are visible immediately.
+
 Then start the app with the API URL:
 
 ```sh
@@ -59,13 +62,30 @@ Created by the idempotent migrations in `pb_migrations/`:
   `created_by`, `participants` (multi-relation, including the creator), and a
   denormalised `last_message_preview` / `last_message_at` /
   `last_message_author` summary.
-- `messages` — `conversation`, `author`, `body`.
+- `messages` — `conversation`, `author`, `body`, optional `reply_to` (a quoted
+  message), and `edited_at`. Replies are quoted inline; there is no separate
+  thread collection.
+- `message_reactions` — `message`, `user`, `emoji`, with a unique
+  `(message, user, emoji)` index so a user cannot add the same reaction twice.
+- `conversation_reads` — `conversation`, `user`, optional `last_read_message`,
+  and `last_read_at`, with a unique `(conversation, user)` index. Read receipts
+  are derived by comparing a reader's `last_read_at` with a message's server
+  creation time.
+- `typing_indicators` — `conversation`, `user`, `last_seen`, with a unique
+  `(conversation, user)` index. These are ephemeral heartbeats, not history.
 
-Rules enforce that only the creator or a participant can read a conversation and
-its messages, and that messages can only be created as the authenticated user.
+Rules enforce that only the creator or a participant can read a conversation, its
+messages, reactions, read positions, and typing rows. Messages can only be created
+as the authenticated user and edited/deleted by their author while they remain a
+participant. Reactions, read positions, and typing rows are owned by the
+authenticated user. A hook also rejects attempts to move a message to another
+conversation or change its author.
 
-`pb_hooks/main.pb.js` updates the conversation summary after each message without
-a client round trip. It also recomputes the summary when a message is deleted.
+`pb_hooks/main.pb.js` updates the conversation summary after each message create,
+edit, or delete without a client round trip. The hook runtime evaluates each
+callback separately, so the summary lookup is inlined in each handler. A
+`typing_cleanup` cron removes typing heartbeats older than two minutes every two
+minutes.
 
 ## App integration
 
@@ -78,11 +98,15 @@ a client round trip. It also recomputes the summary when a message is deleted.
 - Native auth tokens are stored in `expo-secure-store`; the web build uses
   AsyncStorage/localStorage. The session is refreshed on launch.
 - Conversations and messages are fetched from the REST API. Realtime updates use
-  SSE; React Native needs the `react-native-sse` polyfill that
+  SSE for messages, conversations, reactions, read positions, and typing
+  indicators; React Native needs the `react-native-sse` polyfill that
   `src/api/pocketbase.ts` installs.
-- Local read, mute, and notification preferences live in AsyncStorage. Unread
-  badges are per device and approximate: one badge per unread conversation, not
-  one per unread message.
+- Read positions are stored server-side in `conversation_reads` so receipts are
+  visible to every participant. Unread badges still use AsyncStorage and remain
+  approximate: one badge per unread conversation, not one per unread message.
+- Typing heartbeats are sent while the composer has text (throttled to roughly
+  every 2.5 seconds). The UI hides indicators after roughly 7 seconds without a
+  heartbeat, and the backend cron removes abandoned rows.
 - Search queries PocketBase for matching message bodies (in addition to local
   title/participant/preview matching), so older messages are searchable.
 

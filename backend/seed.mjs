@@ -96,17 +96,40 @@ async function main() {
     });
   }
 
-  async function createMessage(conversation, author, body) {
-    await request("/api/collections/messages/records", {
+  async function createMessage(conversation, author, body, replyToId) {
+    const created = await request("/api/collections/messages/records", {
       method: "POST",
       token,
       body: {
         conversation: conversation.id,
         author: author.id,
         body,
+        ...(replyToId ? { reply_to: replyToId } : {}),
       },
     });
     await sleep(30);
+    return created;
+  }
+
+  async function addReaction(message, user, emoji) {
+    await request("/api/collections/message_reactions/records", {
+      method: "POST",
+      token,
+      body: { message: message.id, user: user.id, emoji },
+    });
+  }
+
+  async function markRead(conversation, user, message) {
+    await request("/api/collections/conversation_reads/records", {
+      method: "POST",
+      token,
+      body: {
+        conversation: conversation.id,
+        user: user.id,
+        last_read_message: message.id,
+        last_read_at: message.created,
+      },
+    });
   }
 
   const worship = await createConversation({
@@ -114,19 +137,38 @@ async function main() {
     kind: "team",
     participants: [marcos, sarah, michael],
   });
-  await createMessage(
+  const setList = await createMessage(
     worship,
     sarah,
     "I added the set list for this Sunday. Please review the transitions.",
   );
-  await createMessage(worship, michael, "Looks great. I can bring the extra DI box.");
+  const diBox = await createMessage(
+    worship,
+    michael,
+    "Looks great. I can bring the extra DI box.",
+  );
+  const clickTrack = await createMessage(
+    worship,
+    marcos,
+    "Perfect — I'll bring the click track too.",
+    diBox.id,
+  );
+  await addReaction(setList, marcos, "👍");
+  await addReaction(diBox, sarah, "🎉");
+  await markRead(worship, sarah, clickTrack);
+  await markRead(worship, michael, clickTrack);
 
   const direct = await createConversation({
     title: "Sarah Chen",
     kind: "direct",
     participants: [marcos, sarah],
   });
-  await createMessage(direct, sarah, "Could you confirm the rehearsal time?");
+  const rehearsal = await createMessage(
+    direct,
+    sarah,
+    "Could you confirm the rehearsal time?",
+  );
+  await markRead(direct, marcos, rehearsal);
 
   const planning = await createConversation({
     title: "Service Planning",
@@ -135,7 +177,9 @@ async function main() {
   });
   await createMessage(planning, michael, "The plan is ready for review.");
 
-  console.log("seeded 3 conversations and 4 messages");
+  console.log(
+    "seeded 3 conversations, 5 messages, 2 reactions and 3 read receipts",
+  );
   console.log(`demo login: marcos@example.com / ${DEMO_PASSWORD}`);
   console.log(`secondary:  sarah@example.com / ${DEMO_PASSWORD}`);
 }

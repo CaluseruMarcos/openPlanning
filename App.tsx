@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar";
+import * as Clipboard from "expo-clipboard";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,23 +19,35 @@ import {
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
+  addReaction,
+  clearTypingIndicator,
   createDirectConversation,
   createMessage,
+  deleteMessage,
   describeError,
+  editMessage,
+  fetchConversationReads,
   fetchConversations,
   fetchMessages,
   fetchPeople,
+  fetchTypingIndicators,
   formatTimestamp,
+  heartbeatTyping,
+  markConversationRead,
   parsePocketBaseDate,
   POCKETBASE_URL,
   removeConversation,
+  removeReaction,
   restoreSession,
   searchMessageConversations,
   signIn,
   signOut,
   signUp,
+  subscribeToConversationReads,
   subscribeToConversations,
   subscribeToMessages,
+  subscribeToReactions,
+  subscribeToTypingIndicators,
   toPersonFromSession,
 } from "./src/api/pocketbase";
 import {
@@ -45,16 +58,28 @@ import {
 } from "./src/storage/preferencesStore";
 import type {
   Conversation,
+  ConversationRead,
   Message,
   NotificationPref,
   Person,
+  Reaction,
 } from "./src/types";
 
 type Tab = "chat" | "activity" | "profile";
 type Filter = "all" | "unread" | "teams";
-type SheetName = "menu" | "attach" | "delete" | "about" | null;
+type SheetName =
+  | "menu"
+  | "attach"
+  | "delete"
+  | "about"
+  | "message"
+  | "messageDelete"
+  | "readBy"
+  | null;
 type AuthMode = "signin" | "signup";
 type Session = { user: Person; email: string };
+
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "🎉", "🙏"];
 
 const BRAND_PERSON: Person = {
   id: "open-services",
@@ -90,10 +115,87 @@ function applyUnread(
 }
 
 function mergeMessage(messages: Message[], message: Message): Message[] {
-  if (messages.some((item) => item.id === message.id)) return messages;
+  const index = messages.findIndex((item) => item.id === message.id);
+  if (index >= 0) {
+    const next = [...messages];
+    const existing = next[index];
+    next[index] = {
+      ...existing,
+      ...message,
+      // Realtime message updates do not carry reactions; keep the ones already
+      // loaded unless a full fetch deliberately supplied some.
+      reactions:
+        message.reactions.length > 0 ? message.reactions : existing.reactions,
+      unread: existing.unread,
+    };
+    return next;
+  }
   return [...messages, message].sort((left, right) =>
     left.createdAtIso.localeCompare(right.createdAtIso),
   );
+}
+
+function addReactionToMessages(
+  messages: Message[],
+  reaction: Reaction,
+): Message[] {
+  return messages.map((message) => {
+    if (message.id !== reaction.messageId) return message;
+    if (message.reactions.some((item) => item.id === reaction.id)) return message;
+    return { ...message, reactions: [...message.reactions, reaction] };
+  });
+}
+
+function removeReactionFromMessages(
+  messages: Message[],
+  reactionId: string,
+): Message[] {
+  return messages.map((message) =>
+    message.reactions.some((item) => item.id === reactionId)
+      ? {
+          ...message,
+          reactions: message.reactions.filter((item) => item.id !== reactionId),
+        }
+      : message,
+  );
+}
+
+function summarizeReactions(
+  reactions: Reaction[],
+  meId: string,
+): { emoji: string; count: number; mine: boolean }[] {
+  const summaries = new Map<
+    string,
+    { emoji: string; count: number; mine: boolean }
+  >();
+
+  for (const reaction of reactions) {
+    const summary = summaries.get(reaction.emoji) ?? {
+      emoji: reaction.emoji,
+      count: 0,
+      mine: false,
+    };
+    summary.count += 1;
+    if (reaction.user.id === meId) summary.mine = true;
+    summaries.set(reaction.emoji, summary);
+  }
+
+  return [...summaries.values()];
+}
+
+function readCoversMessage(
+  read: ConversationRead,
+  message: Message,
+): boolean {
+  const readAt = parsePocketBaseDate(read.lastReadAt)?.getTime() ?? 0;
+  const messageAt = parsePocketBaseDate(message.createdAtIso)?.getTime() ?? 0;
+  return readAt >= messageAt;
+}
+
+function firstNames(people: Person[]): string {
+  return people
+    .map((person) => person.name.trim().split(/\s+/)[0] || person.name)
+    .join(", ");
 }
 
 function Avatar({ person, size = 42 }: { person: Person; size?: number }) {
@@ -564,22 +666,44 @@ function ConversationView({
   loading,
   error,
   sending,
+  typingNames,
+  replyTo,
+  editingMessage,
+  reads,
   onBack,
   onSend,
+  onSaveEdit,
+  onCancelReply,
+  onCancelEdit,
   onDetails,
   onOpenMenu,
   onAttach,
+  onLongPressMessage,
+  onToggleReaction,
+  onTyping,
+  onStopTyping,
 }: {
   conversation: Conversation;
   me: Person;
   loading: boolean;
   error: string | null;
   sending: boolean;
+  typingNames: string[];
+  replyTo: Message | null;
+  editingMessage: Message | null;
+  reads: ConversationRead[];
   onBack: () => void;
-  onSend: (body: string) => Promise<boolean>;
+  onSend: (body: string, replyToId: string | null) => Promise<boolean>;
+  onSaveEdit: (messageId: string, body: string) => Promise<boolean>;
+  onCancelReply: () => void;
+  onCancelEdit: () => void;
   onDetails: () => void;
   onOpenMenu: () => void;
   onAttach: () => void;
+  onLongPressMessage: (message: Message) => void;
+  onToggleReaction: (message: Message, emoji: string) => void;
+  onTyping: () => void;
+  onStopTyping: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState("");
@@ -587,12 +711,45 @@ function ConversationView({
 
   const canSend = draft.trim().length > 0 && !sending;
 
+  useEffect(() => {
+    setDraft("");
+  }, [conversation.id]);
+
+  useEffect(() => {
+    if (editingMessage) setDraft(editingMessage.body);
+  }, [editingMessage?.id]);
+
+  function changeDraft(value: string) {
+    setDraft(value);
+    if (value.trim().length > 0) {
+      onTyping();
+    } else {
+      onStopTyping();
+    }
+  }
+
   async function submit() {
     if (!canSend) return;
     const body = draft.trim();
+
+    if (editingMessage) {
+      const saved = await onSaveEdit(editingMessage.id, body);
+      if (saved) setDraft("");
+      return;
+    }
+
     setDraft("");
-    const sent = await onSend(body);
+    onStopTyping();
+    const sent = await onSend(body, replyTo?.id ?? null);
     if (!sent) setDraft(body);
+  }
+
+  function readersFor(message: Message): Person[] {
+    return reads
+      .filter(
+        (read) => read.user.id !== me.id && readCoversMessage(read, message),
+      )
+      .map((read) => read.user);
   }
 
   const participantNames = conversation.participants
@@ -619,8 +776,12 @@ function ConversationView({
         onPress={onDetails}
         style={styles.conversationSubheader}
       >
-        <Text style={styles.subheaderText}>
-          {conversation.participants.length + 1} participants
+        <Text
+          style={typingNames.length > 0 ? styles.typingText : styles.subheaderText}
+        >
+          {typingNames.length > 0
+            ? `${typingNames.join(", ")} ${typingNames.length === 1 ? "is" : "are"} typing…`
+            : `${conversation.participants.length + 1} participants`}
         </Text>
         <Text style={styles.subheaderAction}>Details ›</Text>
       </Pressable>
@@ -651,6 +812,8 @@ function ConversationView({
         }
         renderItem={({ item }) => {
           const mine = item.author.id === me.id;
+          const reactions = summarizeReactions(item.reactions, me.id);
+          const readers = mine ? readersFor(item) : [];
           return (
             <View style={[styles.messageRow, mine && styles.messageRowMine]}>
               <Avatar person={item.author} size={34} />
@@ -660,13 +823,56 @@ function ConversationView({
                     {mine ? "You" : item.author.name}
                   </Text>
                   <Text style={styles.timestamp}>{item.createdAt}</Text>
+                  {item.editedAt ? (
+                    <Text
+                      style={[
+                        styles.editedLabel,
+                        mine && styles.editedLabelMine,
+                      ]}
+                    >
+                      edited
+                    </Text>
+                  ) : null}
                 </View>
-                <View
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Message from ${mine ? "you" : item.author.name}`}
+                  accessibilityHint="Long press for message actions"
+                  onLongPress={() => onLongPressMessage(item)}
+                  delayLongPress={250}
                   style={[
                     styles.messageBubble,
                     mine && styles.messageBubbleMine,
                   ]}
                 >
+                  {item.replyTo ? (
+                    <View
+                      style={[
+                        styles.replyQuote,
+                        mine && styles.replyQuoteMine,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.replyQuoteAuthor,
+                          mine && styles.replyQuoteAuthorMine,
+                        ]}
+                      >
+                        {item.replyTo.author.id === me.id
+                          ? "You"
+                          : item.replyTo.author.name}
+                      </Text>
+                      <Text
+                        numberOfLines={2}
+                        style={[
+                          styles.replyQuoteText,
+                          mine && styles.replyQuoteTextMine,
+                        ]}
+                      >
+                        {item.replyTo.body}
+                      </Text>
+                    </View>
+                  ) : null}
                   <Text
                     style={[
                       styles.messageText,
@@ -675,7 +881,42 @@ function ConversationView({
                   >
                     {item.body}
                   </Text>
-                </View>
+                </Pressable>
+                {reactions.length > 0 ? (
+                  <View
+                    style={[
+                      styles.reactionRow,
+                      mine && styles.reactionRowMine,
+                    ]}
+                  >
+                    {reactions.map((reaction) => (
+                      <Pressable
+                        key={reaction.emoji}
+                        accessibilityRole="button"
+                        accessibilityLabel={`React with ${reaction.emoji}`}
+                        onPress={() => onToggleReaction(item, reaction.emoji)}
+                        style={[
+                          styles.reactionChip,
+                          reaction.mine && styles.reactionChipMine,
+                        ]}
+                      >
+                        <Text style={styles.reactionChipText}>
+                          {reaction.emoji} {reaction.count}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+                {readers.length > 0 ? (
+                  <Text
+                    style={[
+                      styles.readReceiptText,
+                      mine && styles.readReceiptTextMine,
+                    ]}
+                  >
+                    Read by {firstNames(readers)}
+                  </Text>
+                ) : null}
               </View>
             </View>
           );
@@ -684,6 +925,47 @@ function ConversationView({
       {error ? (
         <View style={styles.inlineError}>
           <Text style={styles.inlineErrorText}>{error}</Text>
+        </View>
+      ) : null}
+      {editingMessage ? (
+        <View style={styles.composerContext}>
+          <View style={styles.flex}>
+            <Text style={styles.composerContextLabel}>EDITING MESSAGE</Text>
+            <Text numberOfLines={1} style={styles.composerContextText}>
+              {editingMessage.body}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Cancel editing"
+            onPress={() => {
+              setDraft("");
+              onCancelEdit();
+            }}
+            hitSlop={8}
+          >
+            <Text style={styles.composerContextClose}>×</Text>
+          </Pressable>
+        </View>
+      ) : replyTo ? (
+        <View style={styles.composerContext}>
+          <View style={styles.flex}>
+            <Text style={styles.composerContextLabel}>
+              REPLYING TO{" "}
+              {replyTo.author.id === me.id ? "YOURSELF" : replyTo.author.name.toUpperCase()}
+            </Text>
+            <Text numberOfLines={1} style={styles.composerContextText}>
+              {replyTo.body}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Cancel reply"
+            onPress={onCancelReply}
+            hitSlop={8}
+          >
+            <Text style={styles.composerContextClose}>×</Text>
+          </Pressable>
         </View>
       ) : null}
       <View style={styles.composer}>
@@ -697,8 +979,8 @@ function ConversationView({
         </Pressable>
         <TextInput
           value={draft}
-          onChangeText={setDraft}
-          placeholder="Write a message..."
+          onChangeText={changeDraft}
+          placeholder={editingMessage ? "Edit message..." : "Write a message..."}
           placeholderTextColor="#8D919C"
           style={styles.composerInput}
           multiline
@@ -706,7 +988,7 @@ function ConversationView({
         />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Send message"
+          accessibilityLabel={editingMessage ? "Save message" : "Send message"}
           accessibilityState={{ disabled: !canSend }}
           disabled={!canSend}
           onPress={submit}
@@ -715,7 +997,7 @@ function ConversationView({
           {sending ? (
             <ActivityIndicator color="#FFF" size="small" />
           ) : (
-            <Text style={styles.sendText}>↑</Text>
+            <Text style={styles.sendText}>{editingMessage ? "✓" : "↑"}</Text>
           )}
         </Pressable>
       </View>
@@ -1255,6 +1537,16 @@ function AppShell() {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [sheet, setSheet] = useState<SheetName>(null);
+  const [readsByConversation, setReadsByConversation] = useState<
+    Record<string, ConversationRead[]>
+  >({});
+  const [typingByConversation, setTypingByConversation] = useState<
+    Record<string, Record<string, string>>
+  >({});
+  const [typingClock, setTypingClock] = useState(() => Date.now());
+  const [actionMessageId, setActionMessageId] = useState<string | null>(null);
+  const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const userId = session?.user.id ?? "";
   const readAt = preferences.readAtByUser[userId] ?? {};
@@ -1270,6 +1562,11 @@ function AppShell() {
   readAtRef.current = readAt;
   const markReadRef = useRef<(conversationId: string) => void>(() => undefined);
   const messageRequestRef = useRef(0);
+  const typingClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const lastTypingSentRef = useRef(0);
+  const typingConversationRef = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -1335,6 +1632,29 @@ function AppShell() {
     };
   }, [query, session?.user.id]);
 
+  // Re-render the typing line as heartbeats get stale.
+  useEffect(() => {
+    if (!session) return undefined;
+    const timer = setInterval(() => setTypingClock(Date.now()), 2000);
+    return () => clearInterval(timer);
+  }, [session?.user.id]);
+
+  useEffect(() => {
+    setActionMessageId(null);
+    setReplyTargetId(null);
+    setEditingId(null);
+    setSheet(null);
+  }, [selectedId]);
+
+  // Clear our own indicator when leaving a conversation (or the app).
+  useEffect(() => {
+    return () => {
+      stopTyping();
+    };
+    // stopTyping reads refs; only the conversation change matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
   useEffect(() => {
     if (Platform.OS !== "android") return undefined;
     const subscription = BackHandler.addEventListener(
@@ -1383,6 +1703,9 @@ function AppShell() {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     let unsubscribeMessages: (() => Promise<void>) | null = null;
     let unsubscribeConversations: (() => Promise<void>) | null = null;
+    let unsubscribeReactions: (() => Promise<void>) | null = null;
+    let unsubscribeReads: (() => Promise<void>) | null = null;
+    let unsubscribeTyping: (() => Promise<void>) | null = null;
 
     const refreshConversations = () => {
       if (refreshTimer) clearTimeout(refreshTimer);
@@ -1426,6 +1749,13 @@ function AppShell() {
               ),
             })),
           );
+          setReplyTargetId((current) =>
+            current === deletedId ? null : current,
+          );
+          setEditingId((current) => (current === deletedId ? null : current));
+          setActionMessageId((current) =>
+            current === deletedId ? null : current,
+          );
         }
         refreshConversations();
         return;
@@ -1434,6 +1764,7 @@ function AppShell() {
       const message = event.message;
       if (!message) return;
       const conversationId = message.conversationId;
+      const isUpdate = event.action === "update";
 
       if (
         !conversationsRef.current.some(
@@ -1455,15 +1786,30 @@ function AppShell() {
             messages: isSelected
               ? mergeMessage(conversation.messages, message)
               : conversation.messages,
-            lastMessagePreview: message.body,
-            lastMessageAt: message.createdAtIso,
-            lastMessageAuthorId: message.author.id,
-            unreadCount: isSelected || isMine ? 0 : 1,
+            ...(isUpdate
+              ? {}
+              : {
+                  lastMessagePreview: message.body,
+                  lastMessageAt: message.createdAtIso,
+                  lastMessageAuthorId: message.author.id,
+                  unreadCount: isSelected || isMine ? 0 : 1,
+                }),
           };
         }),
       );
 
-      if (isSelected) markReadRef.current(conversationId);
+      if (!isUpdate) {
+        setTypingByConversation((current) => {
+          const entries = { ...(current[conversationId] ?? {}) };
+          delete entries[message.author.id];
+          return { ...current, [conversationId]: entries };
+        });
+      }
+
+      if (isSelected) {
+        markReadRef.current(conversationId);
+        void persistRead(conversationId, message);
+      }
     })
       .then((unsubscribe) => {
         if (disposed) void unsubscribe();
@@ -1490,6 +1836,104 @@ function AppShell() {
       })
       .catch(() => undefined);
 
+    void subscribeToReactions((event) => {
+      if (disposed) return;
+      if (event.action === "delete") {
+        const reactionId = event.record?.id;
+        if (reactionId) {
+          setConversations((current) =>
+            current.map((conversation) => ({
+              ...conversation,
+              messages: removeReactionFromMessages(
+                conversation.messages,
+                reactionId,
+              ),
+            })),
+          );
+        }
+        return;
+      }
+
+      if (event.reaction) {
+        setConversations((current) =>
+          current.map((conversation) => ({
+            ...conversation,
+            messages: addReactionToMessages(
+              conversation.messages,
+              event.reaction!,
+            ),
+          })),
+        );
+      }
+    })
+      .then((unsubscribe) => {
+        if (disposed) void unsubscribe();
+        else unsubscribeReactions = unsubscribe;
+      })
+      .catch(() => undefined);
+
+    void subscribeToConversationReads((event) => {
+      if (disposed) return;
+      const conversationId = event.record?.conversation;
+      if (!conversationId) return;
+
+      if (event.action === "delete") {
+        const readerId = event.record?.user;
+        if (readerId) {
+          setReadsByConversation((current) => ({
+            ...current,
+            [conversationId]: (current[conversationId] ?? []).filter(
+              (read) => read.user.id !== readerId,
+            ),
+          }));
+        }
+        return;
+      }
+
+      const read = event.read;
+      if (!read) return;
+      setReadsByConversation((current) => {
+        const list = current[conversationId] ?? [];
+        const index = list.findIndex(
+          (item) => item.user.id === read.user.id,
+        );
+        const next =
+          index >= 0
+            ? list.map((item, itemIndex) =>
+                itemIndex === index ? read : item,
+              )
+            : [...list, read];
+        return { ...current, [conversationId]: next };
+      });
+    })
+      .then((unsubscribe) => {
+        if (disposed) void unsubscribe();
+        else unsubscribeReads = unsubscribe;
+      })
+      .catch(() => undefined);
+
+    void subscribeToTypingIndicators((event) => {
+      if (disposed) return;
+      const conversationId = event.record?.conversation;
+      const typingUserId = event.record?.user;
+      if (!conversationId || !typingUserId) return;
+
+      setTypingByConversation((current) => {
+        const entries = { ...(current[conversationId] ?? {}) };
+        if (event.action === "delete") {
+          delete entries[typingUserId];
+        } else if (event.typing) {
+          entries[typingUserId] = event.typing.lastSeenIso;
+        }
+        return { ...current, [conversationId]: entries };
+      });
+    })
+      .then((unsubscribe) => {
+        if (disposed) void unsubscribe();
+        else unsubscribeTyping = unsubscribe;
+      })
+      .catch(() => undefined);
+
     return () => {
       disposed = true;
       if (refreshTimer) clearTimeout(refreshTimer);
@@ -1499,8 +1943,100 @@ function AppShell() {
       if (unsubscribeConversations) {
         void unsubscribeConversations().catch(() => undefined);
       }
+      if (unsubscribeReactions) {
+        void unsubscribeReactions().catch(() => undefined);
+      }
+      if (unsubscribeReads) {
+        void unsubscribeReads().catch(() => undefined);
+      }
+      if (unsubscribeTyping) {
+        void unsubscribeTyping().catch(() => undefined);
+      }
     };
   }, [session?.user.id]);
+
+  async function persistRead(
+    conversationId: string,
+    message: Message | null,
+    readAtIso?: string,
+  ): Promise<void> {
+    if (!session) return;
+    const targetAt = message?.createdAtIso ?? readAtIso;
+    if (!targetAt) return;
+
+    try {
+      const read = await markConversationRead(
+        conversationId,
+        session.user.id,
+        message?.id ?? null,
+        targetAt,
+      );
+      if (!read) return;
+
+      setReadsByConversation((current) => {
+        const list = current[conversationId] ?? [];
+        const index = list.findIndex(
+          (item) => item.user.id === read.user.id,
+        );
+        const next =
+          index >= 0
+            ? list.map((item, itemIndex) =>
+                itemIndex === index ? read : item,
+              )
+            : [...list, read];
+        return { ...current, [conversationId]: next };
+      });
+    } catch {
+      // Read receipts are best-effort; message delivery should not fail.
+    }
+  }
+
+  function stopTyping() {
+    if (typingClearTimerRef.current) {
+      clearTimeout(typingClearTimerRef.current);
+      typingClearTimerRef.current = null;
+    }
+    lastTypingSentRef.current = 0;
+
+    const conversationId = typingConversationRef.current;
+    typingConversationRef.current = null;
+    if (!conversationId || !session) return;
+
+    const currentUserId = session.user.id;
+    setTypingByConversation((current) => {
+      const entries = { ...(current[conversationId] ?? {}) };
+      delete entries[currentUserId];
+      return { ...current, [conversationId]: entries };
+    });
+    void clearTypingIndicator(conversationId, currentUserId).catch(
+      () => undefined,
+    );
+  }
+
+  function noteTyping() {
+    if (!session || !selectedId) return;
+
+    if (
+      typingConversationRef.current &&
+      typingConversationRef.current !== selectedId
+    ) {
+      stopTyping();
+    }
+    typingConversationRef.current = selectedId;
+
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > 2500) {
+      lastTypingSentRef.current = now;
+      void heartbeatTyping(selectedId, session.user.id).catch(() => undefined);
+    }
+
+    if (typingClearTimerRef.current) {
+      clearTimeout(typingClearTimerRef.current);
+    }
+    typingClearTimerRef.current = setTimeout(() => {
+      stopTyping();
+    }, 4000);
+  }
 
   async function loadWorkspace(
     currentUserId: string,
@@ -1556,6 +2092,7 @@ function AppShell() {
   markReadRef.current = markRead;
 
   async function openConversation(conversation: Conversation) {
+    if (!session) return;
     const conversationId = conversation.id;
     const requestId = messageRequestRef.current + 1;
     messageRequestRef.current = requestId;
@@ -1563,18 +2100,43 @@ function AppShell() {
     setComposing(false);
     setSelectedId(conversationId);
     setTab("chat");
+    setReplyTargetId(null);
+    setEditingId(null);
+    setActionMessageId(null);
+    setSheet(null);
     markRead(conversationId);
     setMessageError(null);
     setLoadingMessages(true);
 
     try {
-      const messages = await fetchMessages(conversationId);
+      const [messages, reads, typing] = await Promise.all([
+        fetchMessages(conversationId),
+        fetchConversationReads(conversationId).catch(() => []),
+        fetchTypingIndicators(conversationId).catch(() => []),
+      ]);
       if (messageRequestRef.current !== requestId) return;
+
       setConversations((current) =>
         current.map((item) =>
           item.id === conversationId ? { ...item, messages } : item,
         ),
       );
+      setReadsByConversation((current) => ({
+        ...current,
+        [conversationId]: reads,
+      }));
+      setTypingByConversation((current) => ({
+        ...current,
+        [conversationId]: Object.fromEntries(
+          typing
+            .filter((item) => item.userId !== session.user.id)
+            .map((item) => [item.userId, item.lastSeenIso]),
+        ),
+      }));
+
+      if (messages.length > 0) {
+        void persistRead(conversationId, messages[messages.length - 1]);
+      }
     } catch (error) {
       if (messageRequestRef.current === requestId) {
         setMessageError(describeError(error));
@@ -1586,7 +2148,10 @@ function AppShell() {
     }
   }
 
-  async function sendMessage(body: string): Promise<boolean> {
+  async function sendMessage(
+    body: string,
+    replyToId: string | null = null,
+  ): Promise<boolean> {
     if (!selectedId || !session) return false;
     const conversationId = selectedId;
     const author = session.user;
@@ -1595,7 +2160,12 @@ function AppShell() {
     setMessageError(null);
 
     try {
-      const created = await createMessage(conversationId, author.id, body);
+      const created = await createMessage(
+        conversationId,
+        author.id,
+        body,
+        replyToId ?? undefined,
+      );
       const message = { ...created, author };
       setConversations((current) =>
         current.map((conversation) =>
@@ -1611,7 +2181,9 @@ function AppShell() {
             : conversation,
         ),
       );
+      if (replyToId) setReplyTargetId(null);
       markRead(conversationId);
+      void persistRead(conversationId, message);
       return true;
     } catch (error) {
       setMessageError(describeError(error));
@@ -1619,6 +2191,139 @@ function AppShell() {
     } finally {
       setSending(false);
     }
+  }
+
+  async function saveEditedMessage(
+    messageId: string,
+    body: string,
+  ): Promise<boolean> {
+    if (!selectedId) return false;
+    const conversationId = selectedId;
+
+    setSending(true);
+    setMessageError(null);
+
+    try {
+      const updated = await editMessage(messageId, body);
+      setConversations((current) =>
+        current.map((conversation) => {
+          if (conversation.id !== conversationId) return conversation;
+          const isLatest =
+            conversation.messages[conversation.messages.length - 1]?.id ===
+            messageId;
+          return {
+            ...conversation,
+            messages: mergeMessage(conversation.messages, updated),
+            ...(isLatest
+              ? {
+                  lastMessagePreview: updated.body,
+                  lastMessageAt: updated.createdAtIso,
+                  lastMessageAuthorId: updated.author.id,
+                }
+              : {}),
+          };
+        }),
+      );
+      setEditingId(null);
+      return true;
+    } catch (error) {
+      setMessageError(describeError(error));
+      return false;
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function removeMessage(messageId: string) {
+    setMessageError(null);
+    try {
+      await deleteMessage(messageId);
+      setConversations((current) =>
+        current.map((conversation) => ({
+          ...conversation,
+          messages: conversation.messages.filter(
+            (message) => message.id !== messageId,
+          ),
+        })),
+      );
+      if (replyTargetId === messageId) setReplyTargetId(null);
+      if (editingId === messageId) setEditingId(null);
+      setActionMessageId(null);
+      setSheet(null);
+    } catch (error) {
+      setMessageError(describeError(error));
+      setSheet(null);
+    }
+  }
+
+  function toggleReaction(message: Message, emoji: string) {
+    if (!session) return;
+    const mine = message.reactions.find(
+      (reaction) =>
+        reaction.user.id === session.user.id && reaction.emoji === emoji,
+    );
+    setMessageError(null);
+
+    void (async () => {
+      try {
+        if (mine) {
+          await removeReaction(mine.id);
+          setConversations((current) =>
+            current.map((conversation) => ({
+              ...conversation,
+              messages: removeReactionFromMessages(
+                conversation.messages,
+                mine.id,
+              ),
+            })),
+          );
+        } else {
+          const reaction = await addReaction(
+            message.id,
+            session.user.id,
+            emoji,
+          );
+          setConversations((current) =>
+            current.map((conversation) => ({
+              ...conversation,
+              messages: addReactionToMessages(
+                conversation.messages,
+                reaction,
+              ),
+            })),
+          );
+        }
+      } catch (error) {
+        setMessageError(describeError(error));
+      }
+    })();
+  }
+
+  async function copyMessage(message: Message) {
+    try {
+      await Clipboard.setStringAsync(message.body);
+      setSheet(null);
+    } catch (error) {
+      setMessageError(describeError(error));
+      setSheet(null);
+    }
+  }
+
+  function openMessageActions(message: Message) {
+    setActionMessageId(message.id);
+    setSheet("message");
+  }
+
+  function startReply(message: Message) {
+    setEditingId(null);
+    setReplyTargetId(message.id);
+    setSheet(null);
+  }
+
+  function startEdit(message: Message) {
+    setReplyTargetId(null);
+    setEditingId(message.id);
+    setSheet(null);
   }
 
   async function startConversation(person: Person) {
@@ -1681,6 +2386,12 @@ function AppShell() {
         })),
       })),
     );
+
+    for (const conversation of conversations) {
+      if (conversation.lastMessageAt) {
+        void persistRead(conversation.id, null, conversation.lastMessageAt);
+      }
+    }
   }
 
   function markUnread() {
@@ -1825,6 +2536,7 @@ function AppShell() {
   }
 
   async function handleSignOut() {
+    stopTyping();
     await signOut();
     setSession(null);
     setConversations([]);
@@ -1837,6 +2549,11 @@ function AppShell() {
     setMessageSearchIds({});
     setSearchingMessages(false);
     setSheet(null);
+    setReadsByConversation({});
+    setTypingByConversation({});
+    setActionMessageId(null);
+    setReplyTargetId(null);
+    setEditingId(null);
     setAuthError(null);
     setDataError(null);
     setMessageError(null);
@@ -1865,6 +2582,51 @@ function AppShell() {
     (total, conversation) => total + conversation.unreadCount,
     0,
   );
+  const selectedReads = selectedId
+    ? readsByConversation[selectedId] ?? []
+    : [];
+  const replyTarget =
+    selectedConversation && replyTargetId
+      ? selectedConversation.messages.find(
+          (message) => message.id === replyTargetId,
+        ) ?? null
+      : null;
+  const editingMessage =
+    selectedConversation && editingId
+      ? selectedConversation.messages.find(
+          (message) => message.id === editingId,
+        ) ?? null
+      : null;
+  const actionMessage =
+    selectedConversation && actionMessageId
+      ? selectedConversation.messages.find(
+          (message) => message.id === actionMessageId,
+        ) ?? null
+      : null;
+  const actionMessageReaders = actionMessage
+    ? selectedReads
+        .filter(
+          (read) =>
+            read.user.id !== session?.user.id &&
+            readCoversMessage(read, actionMessage),
+        )
+        .map((read) => read.user)
+    : [];
+  const typingNames = selectedConversation
+    ? Object.entries(typingByConversation[selectedConversation.id] ?? {})
+        .filter(([typingUserId, lastSeen]) => {
+          if (typingUserId === session?.user.id) return false;
+          const seenAt = parsePocketBaseDate(lastSeen)?.getTime() ?? 0;
+          return typingClock - seenAt < 7000;
+        })
+        .map(
+          ([typingUserId]) =>
+            selectedConversation.participants.find(
+              (person) => person.id === typingUserId,
+            )?.name,
+        )
+        .filter((name): name is string => Boolean(name))
+    : [];
 
   if (booting) {
     return (
@@ -1914,14 +2676,25 @@ function AppShell() {
             loading={loadingMessages}
             error={messageError}
             sending={sending}
+            typingNames={typingNames}
+            replyTo={replyTarget}
+            editingMessage={editingMessage}
+            reads={selectedReads}
             onBack={() => setSelectedId(null)}
             onSend={sendMessage}
+            onSaveEdit={saveEditedMessage}
+            onCancelReply={() => setReplyTargetId(null)}
+            onCancelEdit={() => setEditingId(null)}
             onDetails={() => {
               setDetailsId(selectedConversation.id);
               setSelectedId(null);
             }}
             onOpenMenu={() => setSheet("menu")}
             onAttach={() => setSheet("attach")}
+            onLongPressMessage={openMessageActions}
+            onToggleReaction={toggleReaction}
+            onTyping={noteTyping}
+            onStopTyping={stopTyping}
           />
         ) : detailsConversation ? (
           <DetailsView
@@ -2051,6 +2824,114 @@ function AppShell() {
             />
             <SheetRow label="Cancel" onPress={() => setSheet(null)} />
           </Sheet>
+
+          {actionMessage ? (
+            <>
+              <Sheet
+                visible={sheet === "message"}
+                title="Message"
+                onClose={() => setSheet(null)}
+              >
+                <View style={styles.reactionPicker}>
+                  {REACTION_EMOJIS.map((emoji) => {
+                    const active = actionMessage.reactions.some(
+                      (reaction) =>
+                        reaction.user.id === session.user.id &&
+                        reaction.emoji === emoji,
+                    );
+                    return (
+                      <Pressable
+                        key={emoji}
+                        accessibilityRole="button"
+                        accessibilityLabel={`React with ${emoji}`}
+                        accessibilityState={{ selected: active }}
+                        onPress={() => toggleReaction(actionMessage, emoji)}
+                        style={[
+                          styles.reactionPickerButton,
+                          active && styles.reactionPickerButtonActive,
+                        ]}
+                      >
+                        <Text style={styles.reactionPickerEmoji}>{emoji}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <SheetRow
+                  label="Reply"
+                  onPress={() => startReply(actionMessage)}
+                />
+                <SheetRow
+                  label="Copy text"
+                  onPress={() => void copyMessage(actionMessage)}
+                />
+                {actionMessage.author.id === session.user.id ? (
+                  <SheetRow
+                    label="Edit message"
+                    onPress={() => startEdit(actionMessage)}
+                  />
+                ) : null}
+                <SheetRow
+                  label={`Read by${
+                    actionMessageReaders.length > 0
+                      ? ` (${actionMessageReaders.length})`
+                      : ""
+                  }`}
+                  hint={
+                    actionMessageReaders.length > 0
+                      ? firstNames(actionMessageReaders)
+                      : "No one has read this message yet"
+                  }
+                  chevron
+                  onPress={() => setSheet("readBy")}
+                />
+                {actionMessage.author.id === session.user.id ? (
+                  <SheetRow
+                    label="Delete message"
+                    destructive
+                    onPress={() => setSheet("messageDelete")}
+                  />
+                ) : null}
+                <SheetRow label="Cancel" onPress={() => setSheet(null)} />
+              </Sheet>
+
+              <Sheet
+                visible={sheet === "readBy"}
+                title="Read by"
+                onClose={() => setSheet(null)}
+              >
+                {actionMessageReaders.length === 0 ? (
+                  <Text style={styles.sheetBody}>
+                    No one has read this message yet.
+                  </Text>
+                ) : (
+                  actionMessageReaders.map((person) => (
+                    <View key={person.id} style={styles.readerRow}>
+                      <Avatar person={person} size={34} />
+                      <Text style={styles.readerName}>{person.name}</Text>
+                    </View>
+                  ))
+                )}
+                <SheetRow label="Close" onPress={() => setSheet(null)} />
+              </Sheet>
+
+              <Sheet
+                visible={sheet === "messageDelete"}
+                title="Delete this message?"
+                onClose={() => setSheet(null)}
+              >
+                <Text style={styles.sheetBody}>
+                  This removes the message for everyone in the conversation. This
+                  cannot be undone.
+                </Text>
+                <SheetRow
+                  label="Delete message"
+                  destructive
+                  onPress={() => void removeMessage(actionMessage.id)}
+                />
+                <SheetRow label="Cancel" onPress={() => setSheet(null)} />
+              </Sheet>
+            </>
+          ) : null}
         </>
       ) : null}
 
@@ -2424,6 +3305,66 @@ const styles = StyleSheet.create({
   },
   messageText: { color: "#3D414C", fontSize: 15, lineHeight: 22 },
   messageTextMine: { color: "#FFF" },
+  editedLabel: { color: "#A0A3AC", fontSize: 11, fontStyle: "italic" },
+  editedLabelMine: { color: "#B9BCF0" },
+  replyQuote: {
+    backgroundColor: "#F1F1F5",
+    borderLeftColor: "#5B61D6",
+    borderLeftWidth: 3,
+    borderRadius: 8,
+    marginBottom: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  replyQuoteMine: {
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderLeftColor: "rgba(255,255,255,0.75)",
+  },
+  replyQuoteAuthor: { color: "#5B61D6", fontSize: 11, fontWeight: "700" },
+  replyQuoteAuthorMine: { color: "#E7E8FF" },
+  replyQuoteText: { color: "#6D7281", fontSize: 12, lineHeight: 16, marginTop: 2 },
+  replyQuoteTextMine: { color: "#ECEDFF" },
+  reactionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5,
+    marginTop: 6,
+  },
+  reactionRowMine: { justifyContent: "flex-end" },
+  reactionChip: {
+    backgroundColor: "#FFF",
+    borderColor: "#E3E4EA",
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  reactionChipMine: {
+    backgroundColor: "#EEF0FF",
+    borderColor: "#5B61D6",
+  },
+  reactionChipText: { color: "#4A4F5C", fontSize: 12 },
+  readReceiptText: { color: "#8A8E99", fontSize: 11, marginTop: 4 },
+  readReceiptTextMine: { textAlign: "right" },
+  typingText: { color: "#5B61D6", fontSize: 12, fontWeight: "600" },
+  composerContext: {
+    alignItems: "center",
+    backgroundColor: "#EEF0FF",
+    borderTopColor: "#E4E4E9",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  composerContextLabel: {
+    color: "#5B61D6",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+  composerContextText: { color: "#5C6070", fontSize: 12, marginTop: 2 },
+  composerContextClose: { color: "#5B61D6", fontSize: 22 },
   composer: {
     alignItems: "flex-end",
     backgroundColor: "#FFF",
@@ -2641,6 +3582,35 @@ const styles = StyleSheet.create({
   sheetRowText: { color: "#252832", fontSize: 16 },
   sheetRowHint: { color: "#8A8E99", fontSize: 12, marginTop: 2 },
   sheetChevron: { color: "#A0A3AC", fontSize: 20 },
+  reactionPicker: {
+    backgroundColor: "#FFF",
+    borderRadius: 14,
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginBottom: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  reactionPickerButton: {
+    alignItems: "center",
+    borderRadius: 20,
+    height: 40,
+    justifyContent: "center",
+    width: 44,
+  },
+  reactionPickerButtonActive: { backgroundColor: "#EEF0FF" },
+  reactionPickerEmoji: { fontSize: 24 },
+  readerRow: {
+    alignItems: "center",
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 8,
+    minHeight: 52,
+    paddingHorizontal: 14,
+  },
+  readerName: { color: "#252832", fontSize: 15, fontWeight: "600" },
   signInScrollContent: {
     flexGrow: 1,
     justifyContent: "center",
